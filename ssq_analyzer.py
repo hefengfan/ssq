@@ -719,7 +719,7 @@ def run_analysis_and_recommendation(df_hist: pd.DataFrame, ml_lags: List[int], w
     patt_data = analyze_patterns(df_hist)
     ml_models = train_prediction_models(df_hist, ml_lags)
     probabilities = predict_next_draw_probabilities(df_hist, ml_models, ml_lags) if ml_models else {'red': {}, 'blue': {}}
-    scores = calculate_scores(freq_data, probabilities, weights_config, feature_engineer(hist_data))
+    scores = calculate_scores(freq_data, probabilities, weights_config, feature_engineer(df_hist))
     recs, rec_strings = generate_combinations(scores, patt_data, arm_rules, weights_config)
     analysis_summary = {'frequency_omission': freq_data, 'patterns': patt_data}
     return recs, rec_strings, analysis_summary, ml_models, scores
