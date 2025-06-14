@@ -135,15 +135,15 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 1,              # 学习率：控制每次迭代的步长 (increased slightly)
-    'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
-    'num_leaves': 35,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
-    'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
+    'learning_rate': 0.25,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'n_estimators': 200,                # 树的数量：总迭代次数 (reduced)
+    'num_leaves': 40,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
+    'min_child_samples': 20,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
-    'feature_fraction': 0.7,            # 特征采样比例：每次迭代随机选择70%的特征
-    'bagging_fraction': 0.8,            # 数据采样比例：每次迭代随机选择80%的数据
-    'bagging_freq': 5,                  # 数据采样的频率：每5次迭代进行一次
+    'feature_fraction': 0.8,            # 特征采样比例：每次迭代随机选择70%的特征
+    'bagging_fraction': 1,            # 数据采样比例：每次迭代随机选择80%的数据
+    'bagging_freq': 1,                  # 数据采样的频率：每5次迭代进行一次
     'seed': 0,                         # 随机种子：确保结果可复现
     'n_jobs': 1,                        # 并行线程数：设为1以在多进程环境中避免冲突
     'verbose': -1,                      # 控制台输出级别：-1表示静默
