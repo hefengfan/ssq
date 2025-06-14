@@ -58,7 +58,7 @@ PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu_processed.csv')
 # 运行模式配置:
 # True  -> 运行参数优化，耗时较长，但可能找到更优策略。
 # False -> 使用默认权重进行快速分析和推荐。
-ENABLE_OPTUNA_OPTIMIZATION = True
+ENABLE_OPTUNA_OPTIMIZATION = False
 
 # --------------------------
 # --- 策略开关配置 ---
@@ -83,10 +83,8 @@ RED_ZONES = {'Zone1': (1, 11), 'Zone2': (12, 22), 'Zone3': (23, 33)}
 # --------------------------
 # 机器学习模型使用的滞后特征阶数 (e.g., 使用前1、3、5、10期的数据作为特征)
 ML_LAG_FEATURES = [1, 2, 3, 5,8 ,13 ,21 ,34, 55 ,89]
-# 用于生成乘积交互特征的特征对 (e.g., 红球和值 * 红球奇数个数)
-ML_INTERACTION_PAIRS = [('red_sum', 'red_odd_count')]
-# 用于生成自身平方交互特征的特征 (e.g., 红球跨度的平方)
-ML_INTERACTION_SELF = ['red_span']
+ML_INTERACTION_PAIRS = [('red_sum', 'red_span'), ('blue_is_odd', 'red_odd_count')] #Example pairs
+ML_INTERACTION_SELF = ['red_sum', 'red_span']
 # 计算号码“近期”出现频率时所参考的期数窗口大小
 RECENT_FREQ_WINDOW = 20
 # 在分析模式下，进行策略回测时所评估的总期数
@@ -103,65 +101,29 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 25
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
-    # --- 反向思维 ---
-    # 若启用反向思维，从最终推荐列表中移除得分最高的组合的比例
-    'FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT': 0.3,
-
-    # --- 组合生成 ---
-    # 最终向用户推荐的组合（注数）数量
-    'NUM_COMBINATIONS_TO_GENERATE': 10,
-    # 构建红球候选池时，从所有红球中选取分数最高的N个
-    'TOP_N_RED_FOR_CANDIDATE': 25,
-    # 构建蓝球候选池时，从所有蓝球中选取分数最高的N个
-    'TOP_N_BLUE_FOR_CANDIDATE': 6,
-
-    # --- 红球评分权重 ---
-    # 红球历史总频率得分的权重
-    'FREQ_SCORE_WEIGHT': 5,
-    # 红球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'OMISSION_SCORE_WEIGHT': 10,
-    # 红球当前遗漏与其历史最大遗漏比率的得分权重
-    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 10,
-    # 红球近期出现频率的得分权重
-    'RECENT_FREQ_SCORE_WEIGHT_RED': 5,
-    # 红球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_RED': 70,
-
-    # --- 蓝球评分权重 ---
-    # 蓝球历史总频率得分的权重
-    'BLUE_FREQ_SCORE_WEIGHT': 5,
-    # 蓝球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'BLUE_OMISSION_SCORE_WEIGHT': 15,
-    # 蓝球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_BLUE': 80,
-
-    # --- 组合属性匹配奖励 ---
-    # 推荐组合的红球奇数个数若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_ODD_COUNT_MATCH_BONUS': 13.10,
-    # 推荐组合的蓝球奇偶性若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_BLUE_ODD_MATCH_BONUS': 0.40,
-    # 推荐组合的红球区间分布若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_ZONE_MATCH_BONUS': 13.12,
-    # 推荐组合的蓝球大小若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_BLUE_SIZE_MATCH_BONUS': 0.84,
-
-    # --- 关联规则挖掘(ARM)参数与奖励 ---
-    # ARM算法的最小支持度阈值
-    'ARM_MIN_SUPPORT': 0.01,
-    # ARM算法的最小置信度阈值
-    'ARM_MIN_CONFIDENCE': 0.53,
-    # ARM算法的最小提升度阈值
-    'ARM_MIN_LIFT': 1.53,
-    # 推荐组合若命中了某条挖掘出的关联规则，其获得的基础奖励分值
-    'ARM_COMBINATION_BONUS_WEIGHT': 18.86,
-    # 在计算ARM奖励时，规则的提升度(lift)对此奖励的贡献乘数因子
-    'ARM_BONUS_LIFT_FACTOR': 0.48,
-    # 在计算ARM奖励时，规则的置信度(confidence)对此奖励的贡献乘数因子
-    'ARM_BONUS_CONF_FACTOR': 0.25,
-
-    # --- 组合多样性控制 ---
-    # 最终推荐的任意两注组合之间，其红球号码至少要有几个是不同的
-    'DIVERSITY_MIN_DIFFERENT_REDS': 2,
+  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.3813685779612927,
+  "NUM_COMBINATIONS_TO_GENERATE": 15,
+  "TOP_N_RED_FOR_CANDIDATE": 18,
+  "TOP_N_BLUE_FOR_CANDIDATE": 26,
+  "FREQ_SCORE_WEIGHT": 6,
+  "OMISSION_SCORE_WEIGHT": 11,
+  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 12,
+  "RECENT_FREQ_SCORE_WEIGHT_RED": 5,
+  "ML_PROB_SCORE_WEIGHT_RED": 68,
+  "BLUE_FREQ_SCORE_WEIGHT": 4,
+  "BLUE_OMISSION_SCORE_WEIGHT": 14,
+  "ML_PROB_SCORE_WEIGHT_BLUE": 78,
+  "COMBINATION_ODD_COUNT_MATCH_BONUS": 15.699297127217168,
+  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.43807513005623916,
+  "COMBINATION_ZONE_MATCH_BONUS": 21.49846544443443,
+  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 0.6032003114130048,
+  "ARM_MIN_SUPPORT": 0.0066766234583815285,
+  "ARM_MIN_CONFIDENCE": 0.4862479894120971,
+  "ARM_MIN_LIFT": 2.756025927281908,
+  "ARM_COMBINATION_BONUS_WEIGHT": 10.024728287197824,
+  "ARM_BONUS_LIFT_FACTOR": 0.46860609175193924,
+  "ARM_BONUS_CONF_FACTOR": 0.30646411237371496,
+  "DIVERSITY_MIN_DIFFERENT_REDS": 3
 }
 
 # ==============================================================================
@@ -171,9 +133,9 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.2,              # 学习率：控制每次迭代的步长
-    'n_estimators': 100,                # 树的数量：总迭代次数
-    'num_leaves': 20,                   # 每棵树的最大叶子节点数：控制模型复杂度
+    'learning_rate': 0.25,              # 学习率：控制每次迭代的步长
+    'n_estimators': 150,                # 树的数量：总迭代次数
+    'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
@@ -335,73 +297,100 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
 
+
 def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
-    为DataFrame计算各种衍生特征，如和值、跨度、奇偶比、区间分布等。
+    Computes various derived features for a DataFrame, including sum, span, odd-even ratio, 
+    interval distribution, logarithmic transformations, and more.
 
     Args:
-        df (pd.DataFrame): 经过清洗和结构化后的DataFrame。
+        df (pd.DataFrame): Cleaned and structured DataFrame.
 
     Returns:
-        Optional[pd.DataFrame]: 包含新计算特征的DataFrame。
+        Optional[pd.DataFrame]: DataFrame with new computed features, or None if input is invalid.
     """
-    if df is None or df.empty: return None
+    if df is None or df.empty:
+        return None
     df_fe = df.copy()
     red_cols = [f'red{i+1}' for i in range(6)]
-    
-    # 基本统计特征
+
+    # Basic statistical features
     df_fe['red_sum'] = df_fe[red_cols].sum(axis=1)
     df_fe['red_span'] = df_fe[red_cols].max(axis=1) - df_fe[red_cols].min(axis=1)
     df_fe['red_odd_count'] = df_fe[red_cols].apply(lambda r: sum(x % 2 != 0 for x in r), axis=1)
-    
-    # 区间特征
+    df_fe['red_mean'] = df_fe[red_cols].mean(axis=1)
+    df_fe['red_std'] = df_fe[red_cols].std(axis=1)
+    df_fe['red_skew'] = df_fe[red_cols].skew(axis=1) #Added Skewness
+    df_fe['red_kurt'] = df_fe[red_cols].kurt(axis=1) #Added Kurtosis
+
+    # Logarithmic transformations (handle potential errors)
+    try:
+        df_fe['red_sum_log'] = df_fe['red_sum'].apply(lambda x: 0 if x <=0 else  (x).apply(lambda x: 0 if x <= 0 else np.log(x)))
+    except Exception as e:
+        print(f"Error during log transformation: {e}")
+
+    # Interval features
     for zone, (start, end) in RED_ZONES.items():
         df_fe[f'red_{zone}_count'] = df_fe[red_cols].apply(lambda r: sum(start <= x <= end for x in r), axis=1)
-        
-    # 形态特征
-    def count_consecutive(row): return sum(1 for i in range(5) if row.iloc[i+1] - row.iloc[i] == 1)
+
+    # Shape features
+    def count_consecutive(row):
+        return sum(1 for i in range(5) if row.iloc[i+1] - row.iloc[i] == 1)
+
     df_fe['red_consecutive_count'] = df_fe[red_cols].apply(count_consecutive, axis=1)
-    
-    # 重号特征 (与上一期的重复个数)
+
+    # Repeated number features (count of repeated numbers from the previous period)
     red_sets = df_fe[red_cols].apply(set, axis=1)
     prev_red_sets = red_sets.shift(1)
-    df_fe['red_repeat_count'] = [len(current.intersection(prev)) if isinstance(prev, set) else 0 for current, prev in zip(red_sets, prev_red_sets)]
-    
-    # 蓝球特征
+    df_fe['red_repeat_count'] = [len(current.intersection(prev)) if isinstance(prev, set) else 0
+                                 for current, prev in zip(red_sets, prev_red_sets)]
+
+    # Blue ball features
     df_fe['blue_is_odd'] = (df_fe['blue'] % 2 != 0).astype(int)
     df_fe['blue_is_large'] = (df_fe['blue'] > 8).astype(int)
-    
+    df_fe['blue_log'] = df_fe['blue'].apply(lambda x: 0 if x <= 0 else np.log(x)) #Added log transformation
+
+    #Added count features for blue ball
+    df_fe['blue_count'] = df_fe['blue'].apply(lambda x: x)
+
     return df_fe
+
 
 def create_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """
-    为机器学习模型创建滞后特征（将历史期的特征作为当前期的输入）和交互特征。
+    Creates lagged features (using features from previous periods as input for the current period)
+    and interaction features for a machine learning model.
 
     Args:
-        df (pd.DataFrame): 包含基础特征的DataFrame。
-        lags (List[int]): 滞后阶数列表, e.g., [1, 3, 5]。
+        df (pd.DataFrame): DataFrame containing basic features.
+        lags (List[int]): List of lag orders, e.g., [1, 3, 5].
 
     Returns:
-        Optional[pd.DataFrame]: 一个只包含滞后和交互特征的DataFrame。
+        Optional[pd.DataFrame]: A DataFrame containing only lagged and interaction features, or None if input is invalid.
     """
-    if df is None or df.empty or not lags: return None
-    
+    import numpy as np
+    if df is None or df.empty or not lags:
+        return None
+
     feature_cols = [col for col in df.columns if 'red_' in col or 'blue_' in col]
     df_features = df[feature_cols].copy()
-    
-    # 创建交互特征
+
+    # Create interaction features
     for c1, c2 in ML_INTERACTION_PAIRS:
-        if c1 in df_features and c2 in df_features: df_features[f'{c1}_x_{c2}'] = df_features[c1] * df_features[c2]
+        if c1 in df_features and c2 in df_features:
+            df_features[f'{c1}_x_{c2}'] = df_features[c1] * df_features[c2]
     for c in ML_INTERACTION_SELF:
-        if c in df_features: df_features[f'{c}_sq'] = df_features[c]**2
-        
-    # 创建滞后特征
+        if c in df_features:
+            df_features[f'{c}_sq'] = df_features[c] ** 2
+
+    # Create lagged features
     all_feature_cols = df_features.columns.tolist()
     lagged_dfs = [df_features[all_feature_cols].shift(lag).add_suffix(f'_lag{lag}') for lag in lags]
     final_df = pd.concat(lagged_dfs, axis=1)
     final_df.dropna(inplace=True)
-    
+
     return final_df if not final_df.empty else None
+
 
 # ==============================================================================
 # --- 分析与评分模块 ---
