@@ -498,7 +498,7 @@ def analyze_associations(df: pd.DataFrame, weights_config: Dict) -> pd.DataFrame
     except Exception as e:
         logger.error(f"关联规则分析失败: {e}"); return pd.DataFrame()
 
-def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict) -> Dict[str, Dict[int, float]]:
+def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict, df_fe: pd.DataFrame) -> Dict[str, Dict[int, float]]:
     """
     Calculates final scores for each ball, incorporating frequency, omission, and ML predictions. Weights are adjustable.
     """
