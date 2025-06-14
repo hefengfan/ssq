@@ -103,65 +103,29 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 10  # Reduced for speed
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
-    # --- 反向思维 ---
-    # 若启用反向思维，从最终推荐列表中移除得分最高的组合的比例
-    'FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT': 0.3,
-
-    # --- 组合生成 ---
-    # 最终向用户推荐的组合（注数）数量
-    'NUM_COMBINATIONS_TO_GENERATE': 5,  # Reduced for speed
-    # 构建红球候选池时，从所有红球中选取分数最高的N个
-    'TOP_N_RED_FOR_CANDIDATE': 20,  # Reduced for speed
-    # 构建蓝球候选池时，从所有蓝球中选取分数最高的N个
-    'TOP_N_BLUE_FOR_CANDIDATE': 5,  # Reduced for speed
-
-    # --- 红球评分权重 ---
-    # 红球历史总频率得分的权重
-    'FREQ_SCORE_WEIGHT': 5,
-    # 红球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'OMISSION_SCORE_WEIGHT': 15,
-    # 红球当前遗漏与其历史最大遗漏比率的得分权重
-    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 15,
-    # 红球近期出现频率的得分权重
-    'RECENT_FREQ_SCORE_WEIGHT_RED': 5,
-    # 红球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_RED': 60,
-
-    # --- 蓝球评分权重 ---
-    # 蓝球历史总频率得分的权重
-    'BLUE_FREQ_SCORE_WEIGHT': 5,
-    # 蓝球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'BLUE_OMISSION_SCORE_WEIGHT': 15,
-    # 蓝球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_BLUE': 80,
-
-    # --- 组合属性匹配奖励 ---
-    # 推荐组合的红球奇数个数若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_ODD_COUNT_MATCH_BONUS': 10,
-    # 推荐组合的蓝球奇偶性若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_BLUE_ODD_MATCH_BONUS': 0.4,
-    # 推荐组合的红球区间分布若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_ZONE_MATCH_BONUS': 10,
-    # 推荐组合的蓝球大小若与历史最常见模式匹配，获得的奖励分值
-    'COMBINATION_BLUE_SIZE_MATCH_BONUS': 0.84,
-
-    # --- 关联规则挖掘(ARM)参数与奖励 ---
-    # ARM算法的最小支持度阈值
-    'ARM_MIN_SUPPORT': 0.01,
-    # ARM算法的最小置信度阈值
-    'ARM_MIN_CONFIDENCE': 0.53,
-    # ARM算法的最小提升度阈值
-    'ARM_MIN_LIFT': 1.53,
-    # 推荐组合若命中了某条挖掘出的关联规则，其获得的基础奖励分值
-    'ARM_COMBINATION_BONUS_WEIGHT': 18.86,
-    # 在计算ARM奖励时，规则的提升度(lift)对此奖励的贡献乘数因子
-    'ARM_BONUS_LIFT_FACTOR': 0.48,
-    # 在计算ARM奖励时，规则的置信度(confidence)对此奖励的贡献乘数因子
-    'ARM_BONUS_CONF_FACTOR': 0.25,
-
-    # --- 组合多样性控制 ---
-    # 最终推荐的任意两注组合之间，其红球号码至少要有几个是不同的
-    'DIVERSITY_MIN_DIFFERENT_REDS': 2,
+  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.3247777974593497,
+  "NUM_COMBINATIONS_TO_GENERATE": 14,
+  "TOP_N_RED_FOR_CANDIDATE": 21,
+  "TOP_N_BLUE_FOR_CANDIDATE": 26,
+  "FREQ_SCORE_WEIGHT": 15.248109347154,
+  "OMISSION_SCORE_WEIGHT": 19.639343615286005,
+  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 28.34297807636047,
+  "RECENT_FREQ_SCORE_WEIGHT_RED": 28.504694647769067,
+  "ML_PROB_SCORE_WEIGHT_RED": 16.973514287184265,
+  "BLUE_FREQ_SCORE_WEIGHT": 47.17519510468611,
+  "BLUE_OMISSION_SCORE_WEIGHT": 21.157693260780757,
+  "ML_PROB_SCORE_WEIGHT_BLUE": 76.51254091435744,
+  "COMBINATION_ODD_COUNT_MATCH_BONUS": 26.191579744318496,
+  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.7780695387661352,
+  "COMBINATION_ZONE_MATCH_BONUS": 17.48036669247915,
+  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 1.126986730885192,
+  "ARM_MIN_SUPPORT": 0.008223245492978464,
+  "ARM_MIN_CONFIDENCE": 0.5283910873993772,
+  "ARM_MIN_LIFT": 1.908294576436964,
+  "ARM_COMBINATION_BONUS_WEIGHT": 27.754081810577038,
+  "ARM_BONUS_LIFT_FACTOR": 0.42915260115975473,
+  "ARM_BONUS_CONF_FACTOR": 0.26867470748037503,
+  "DIVERSITY_MIN_DIFFERENT_REDS": 3
 }
 
 # ==============================================================================
@@ -171,8 +135,8 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.25,              # 学习率：控制每次迭代的步长 (increased slightly)
-    'n_estimators': 50,                # 树的数量：总迭代次数 (reduced)
+    'learning_rate': 1,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
     'num_leaves': 35,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
