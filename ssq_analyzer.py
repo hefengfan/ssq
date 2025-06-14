@@ -94,7 +94,7 @@ OPTIMIZATION_BACKTEST_PERIODS = 30
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
 OPTIMIZATION_TRIALS = 20
 # 训练机器学习模型时，一个球号在历史数据中至少需要出现的次数 (防止样本过少导致模型不可靠)
-MIN_POSITIVE_SAMPLES_FOR_ML = 25
+MIN_POSITIVE_SAMPLES_FOR_ML = 15
 
 # ==============================================================================
 # --- 默认权重配置 (这些参数可被Optuna优化) ---
@@ -134,7 +134,7 @@ LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
     'learning_rate': 0.25,              # 学习率：控制每次迭代的步长
-    'n_estimators': 150,                # 树的数量：总迭代次数
+    'n_estimators': 100,                # 树的数量：总迭代次数
     'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合
     'lambda_l1': 0.15,                  # L1 正则化
