@@ -517,12 +517,12 @@ def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict, df_fe:
         recent_s = recent_freq.get(num, 0) * weights['RECENT_FREQ_SCORE_WEIGHT_RED']
         ml_s = r_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_RED']
 
-        # Scores for new features
-        mean_s = df_fe['red_mean'].loc[df_fe[f'red{i}'] == num].mean() * weights['MEAN_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
-        median_s = df_fe['red_median'].loc[df_fe[f'red{i}'] == num].mean() * weights['MEDIAN_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
-        std_s = df_fe['red_std'].loc[df_fe[f'red{i}'] == num].mean() * weights['STD_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
-        consecutive_s = df_fe['red_consecutive_count'].loc[df_fe[f'red{i}'] == num].mean() * weights['CONSECUTIVE_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
-        slanted_s = df_fe['red_slanted_pairs'].loc[df_fe[f'red{i}'] == num].mean() * weights['SLANTED_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+        # Scores for new features - CORRECTED indexing
+        mean_s = df_fe['red_mean'].loc[df_fe['red_sum'] == num].mean() * weights['MEAN_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
+        median_s = df_fe['red_median'].loc[df_fe['red_sum'] == num].mean() * weights['MEDIAN_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
+        std_s = df_fe['red_std'].loc[df_fe['red_sum'] == num].mean() * weights['STD_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
+        consecutive_s = df_fe['red_consecutive_count'].loc[df_fe['red_sum'] == num].mean() * weights['CONSECUTIVE_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
+        slanted_s = df_fe['red_slanted_pairs'].loc[df_fe['red_sum'] == num].mean() * weights['SLANTED_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
 
         r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s, mean_s, median_s, std_s, consecutive_s, slanted_s])
 
@@ -533,7 +533,7 @@ def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict, df_fe:
         ml_s = b_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_BLUE']
         b_scores[num] = sum([freq_s, omit_s, ml_s])
 
-    # 归一化所有分数到0-100范围，便于比较
+    # Normalize scores (0-100 range)
     def normalize_scores(scores_dict):
         if not scores_dict: return {}
         vals = list(scores_dict.values())
