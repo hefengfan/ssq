@@ -58,7 +58,7 @@ PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu_processed.csv')
 # 运行模式配置:
 # True  -> 运行参数优化，耗时较长，但可能找到更优策略。
 # False -> 使用默认权重进行快速分析和推荐。
-ENABLE_OPTUNA_OPTIMIZATION = False  # Changed to False for faster execution
+ENABLE_OPTUNA_OPTIMIZATION = True  # Changed to False for faster execution
 
 # --------------------------
 # --- 策略开关配置 ---
@@ -155,7 +155,7 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.25,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'learning_rate': 0.3,              # 学习率：控制每次迭代的步长 (increased slightly)
     'n_estimators': 80,                # 树的数量：总迭代次数 (reduced)
     'num_leaves': 20,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 20,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
