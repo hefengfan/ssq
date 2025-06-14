@@ -298,108 +298,91 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             continue
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
-
 def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
-    为DataFrame计算各种衍生特征，如和值、跨度、奇偶比、区间分布等，新增对数特征和斜连组特征。
-
-    Args:
-        df (pd.DataFrame): 经过清洗和结构化后的DataFrame。
-
-    Returns:
-        Optional[pd.DataFrame]: 包含新计算特征的DataFrame。
+    Enhances the DataFrame with various derived features for Double Color Ball prediction.
     """
-    if df is None or df.empty: return None
+    if df is None or df.empty:
+        return None
     df_fe = df.copy()
     red_cols = [f'red{i+1}' for i in range(6)]
-    
-    # 基本统计特征
+
+    # Basic statistical features
     df_fe['red_sum'] = df_fe[red_cols].sum(axis=1)
     df_fe['red_span'] = df_fe[red_cols].max(axis=1) - df_fe[red_cols].min(axis=1)
     df_fe['red_odd_count'] = df_fe[red_cols].apply(lambda r: sum(x % 2 != 0 for x in r), axis=1)
-    
-    # 区间特征
+    df_fe['red_even_count'] = 6 - df_fe['red_odd_count'] #Added even count
+    df_fe['red_mean'] = df_fe[red_cols].mean(axis=1) #Added mean
+    df_fe['red_median'] = df_fe[red_cols].median(axis=1) #Added median
+    df_fe['red_std'] = df_fe[red_cols].std(axis=1) #Added standard deviation
+
+    # Zone features
     for zone, (start, end) in RED_ZONES.items():
         df_fe[f'red_{zone}_count'] = df_fe[red_cols].apply(lambda r: sum(start <= x <= end for x in r), axis=1)
-        
-    # 形态特征
-    def count_consecutive(row): return sum(1 for i in range(5) if row.iloc[i+1] - row.iloc[i] == 1)
+
+    # Shape features (consecutive numbers)
+    def count_consecutive(row):
+        return sum(1 for i in range(5) if row.iloc[i+1] - row.iloc[i] == 1)
     df_fe['red_consecutive_count'] = df_fe[red_cols].apply(count_consecutive, axis=1)
-    
-    # 重号特征 (与上一期的重复个数)
+
+    # Repeat features (number of repeated numbers from the previous period)
     red_sets = df_fe[red_cols].apply(set, axis=1)
     prev_red_sets = red_sets.shift(1)
-    df_fe['red_repeat_count'] = [len(current.intersection(prev)) if isinstance(prev, set) else 0 for current, prev in zip(red_sets, prev_red_sets)]
-    
-    # 蓝球特征
+    df_fe['red_repeat_count'] = [len(current.intersection(prev)) if isinstance(prev, set) else 0
+                                 for current, prev in zip(red_sets, prev_red_sets)]
+
+    # Blue ball features
     df_fe['blue_is_odd'] = (df_fe['blue'] % 2 != 0).astype(int)
     df_fe['blue_is_large'] = (df_fe['blue'] > 8).astype(int)
-    
-    # 新增对数特征
-    df_fe['red_log_sum'] = df_fe[red_cols].apply(lambda r: sum(np.log(x) for x in r), axis=1)
-    df_fe['red_log_avg'] = df_fe['red_log_sum'] / 6
-    
-    # 新增斜连组特征
+
+    # Added log features (improved)
+    df_fe['red_log_sum'] = np.log1p(df_fe['red_sum']) #using log1p to handle 0
+    df_fe['red_log_avg'] = np.log1p(df_fe['red_mean']) #using log1p to handle 0
+
+    # Added features:  Sum of squares, and sum of absolute differences between consecutive numbers
+    df_fe['red_sum_sq'] = (df_fe[red_cols]**2).sum(axis=1)
+    df_fe['red_abs_diff_sum'] = df_fe[red_cols].diff(axis=1).abs().sum(axis=1)
+
+
+    # Slanted pairs feature (improved efficiency)
     def count_slanted_pairs(row):
         count = 0
-        if row.name == 0:  # 第一行没有前一行数据
-            return 0
-            
-        prev_row = df_fe.iloc[row.name - 1]
-        prev_nums = prev_row[red_cols].values
-        current_nums = row[red_cols].values
-        
-        for c_num in current_nums:
-            for p_num in prev_nums:
-                if abs(c_num - p_num) == 1:
-                    count += 1
-                    break
+        if row.name > 0:  # Check for first row
+            prev_row = df_fe.iloc[row.name - 1]
+            count = sum(1 for c_num in row[red_cols] for p_num in prev_row[red_cols] if abs(c_num - p_num) == 1)
         return count
-    
+
     df_fe['red_slanted_pairs'] = df_fe.apply(count_slanted_pairs, axis=1)
-    
+
     return df_fe
+
+
 def create_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """
-    为机器学习模型创建滞后特征（将历史期的特征作为当前期的输入）和交互特征。
-
-    Args:
-        df (pd.DataFrame): 包含基础特征的DataFrame。
-        lags (List[int]): 滞后阶数列表, e.g., [1, 3, 5].
-
-    Returns:
-        Optional[pd.DataFrame]: 一个只包含滞后和交互特征的DataFrame。
+    Creates lagged features and interaction features for the machine learning model.
     """
-    if df is None or df.empty or not lags: return None
-    
+    if df is None or df.empty or not lags:
+        return None
+
     feature_cols = [col for col in df.columns if 'red_' in col or 'blue_' in col]
     df_features = df[feature_cols].copy()
-    
-    # 创建交互特征
+
+    # Create interaction features (more comprehensive)
     for c1, c2 in ML_INTERACTION_PAIRS:
-        if c1 in df_features and c2 in df_features: 
+        if c1 in df_features and c2 in df_features:
             df_features[f'{c1}_x_{c2}'] = df_features[c1] * df_features[c2]
     for c in ML_INTERACTION_SELF:
-        if c in df_features: 
+        if c in df_features:
             df_features[f'{c}_sq'] = df_features[c]**2
-            
-    # 创建对数特征的交互项
-    if 'red_log_sum' in df_features and 'red_sum' in df_features:
-        df_features['log_sum_x_sum'] = df_features['red_log_sum'] * df_features['red_sum']
-    if 'red_log_avg' in df_features and 'red_span' in df_features:
-        df_features['log_avg_x_span'] = df_features['red_log_avg'] * df_features['red_span']
-        
-    # 创建斜连组特征的交互项
-    if 'red_slanted_pairs' in df_features and 'red_repeat_count' in df_features:
-        df_features['slanted_x_repeat'] = df_features['red_slanted_pairs'] * df_features['red_repeat_count']
-    
-    # 创建滞后特征
+
+    # Create lagged features
     all_feature_cols = df_features.columns.tolist()
     lagged_dfs = [df_features[all_feature_cols].shift(lag).add_suffix(f'_lag{lag}') for lag in lags]
     final_df = pd.concat(lagged_dfs, axis=1)
     final_df.dropna(inplace=True)
-    
+
     return final_df if not final_df.empty else None
+
 
 # ==============================================================================
 # --- 分析与评分模块 ---
@@ -517,38 +500,33 @@ def analyze_associations(df: pd.DataFrame, weights_config: Dict) -> pd.DataFrame
 
 def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict) -> Dict[str, Dict[int, float]]:
     """
-    根据所有分析结果（频率、遗漏、ML预测），使用加权公式计算每个球的最终推荐分数。
-
-    Args:
-        freq_data (Dict): 来自 `analyze_frequency_omission` 的频率和遗漏分析结果。
-        probabilities (Dict): 来自机器学习模型的预测概率。
-        weights (Dict): 包含所有评分权重的配置字典。
-
-    Returns:
-        Dict[str, Dict[int, float]]: 包含红球和蓝球归一化后分数的字典。
+    Calculates final scores for each ball, incorporating frequency, omission, and ML predictions. Weights are adjustable.
     """
     r_scores, b_scores = {}, {}
     r_freq, b_freq = freq_data.get('red_freq', {}), freq_data.get('blue_freq', {})
     omission, avg_int = freq_data.get('current_omission', {}), freq_data.get('average_interval', {})
     max_hist_o, recent_freq = freq_data.get('max_historical_omission_red', {}), freq_data.get('recent_N_freq_red', {})
     r_pred, b_pred = probabilities.get('red', {}), probabilities.get('blue', {})
-    
-    # 红球评分
+
+    # Red ball scoring (with weights for new features)
     for num in RED_BALL_RANGE:
-        # 频率分：出现次数越多，得分越高
         freq_s = (r_freq.get(num, 0)) * weights['FREQ_SCORE_WEIGHT']
-        # 遗漏分：当前遗漏接近平均遗漏时得分最高，过冷或过热都会降低分数
         omit_s = np.exp(-0.005 * (omission.get(num, 0) - avg_int.get(num, 0))**2) * weights['OMISSION_SCORE_WEIGHT']
-        # 最大遗漏比率分：当前遗漏接近或超过历史最大遗漏时得分高（博冷）
         max_o_ratio = (omission.get(num, 0) / max_hist_o.get(num, 1)) if max_hist_o.get(num, 0) > 0 else 0
         max_o_s = max_o_ratio * weights['MAX_OMISSION_RATIO_SCORE_WEIGHT_RED']
-        # 近期频率分：近期出现次数越多，得分越高（追热）
         recent_s = recent_freq.get(num, 0) * weights['RECENT_FREQ_SCORE_WEIGHT_RED']
-        # ML预测分
         ml_s = r_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_RED']
-        r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s])
-        
-    # 蓝球评分
+
+        # Scores for new features
+        mean_s = df_fe['red_mean'].loc[df_fe[f'red{i}'] == num].mean() * weights['MEAN_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+        median_s = df_fe['red_median'].loc[df_fe[f'red{i}'] == num].mean() * weights['MEDIAN_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+        std_s = df_fe['red_std'].loc[df_fe[f'red{i}'] == num].mean() * weights['STD_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+        consecutive_s = df_fe['red_consecutive_count'].loc[df_fe[f'red{i}'] == num].mean() * weights['CONSECUTIVE_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+        slanted_s = df_fe['red_slanted_pairs'].loc[df_fe[f'red{i}'] == num].mean() * weights['SLANTED_SCORE_WEIGHT'] if num in df_fe[f'red{i}'].values else 0
+
+        r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s, mean_s, median_s, std_s, consecutive_s, slanted_s])
+
+    # Blue ball scoring (with potential adjustments)
     for num in BLUE_BALL_RANGE:
         freq_s = (b_freq.get(num, 0)) * weights['BLUE_FREQ_SCORE_WEIGHT']
         omit_s = np.exp(-0.01 * (omission.get(f'blue_{num}', 0) - avg_int.get(f'blue_{num}', 0))**2) * weights['BLUE_OMISSION_SCORE_WEIGHT']
