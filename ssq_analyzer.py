@@ -299,7 +299,6 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
 
-
 def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     为DataFrame计算各种衍生特征，如和值、跨度、奇偶比、区间分布等，新增对数特征和斜连组特征。
