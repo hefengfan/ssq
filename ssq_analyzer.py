@@ -64,9 +64,9 @@ ENABLE_OPTUNA_OPTIMIZATION = True
 # --- 策略开关配置 ---
 # --------------------------
 # 是否启用最终推荐组合层面的“反向思维”策略 (移除得分最高的几注)
-ENABLE_FINAL_COMBO_REVERSE = True
+ENABLE_FINAL_COMBO_REVERSE = False
 # 在启用反向思维并移除组合后，是否从候选池中补充新的组合以达到目标数量
-ENABLE_REVERSE_REFILL = True
+ENABLE_REVERSE_REFILL = False
 
 # --------------------------
 # --- 彩票规则配置 ---
@@ -82,7 +82,7 @@ RED_ZONES = {'Zone1': (1, 11), 'Zone2': (12, 22), 'Zone3': (23, 33)}
 # --- 分析与执行参数配置 ---
 # --------------------------
 # 机器学习模型使用的滞后特征阶数 (e.g., 使用前1、3、5、10期的数据作为特征)
-ML_LAG_FEATURES = [1, 3, 5, 10]
+ML_LAG_FEATURES = [1, 2, 3, 5,8 ,13 ,21 ,34, 55 ,89]
 # 用于生成乘积交互特征的特征对 (e.g., 红球和值 * 红球奇数个数)
 ML_INTERACTION_PAIRS = [('red_sum', 'red_odd_count')]
 # 用于生成自身平方交互特征的特征 (e.g., 红球跨度的平方)
@@ -90,11 +90,11 @@ ML_INTERACTION_SELF = ['red_span']
 # 计算号码“近期”出现频率时所参考的期数窗口大小
 RECENT_FREQ_WINDOW = 20
 # 在分析模式下，进行策略回测时所评估的总期数
-BACKTEST_PERIODS_COUNT = 100
+BACKTEST_PERIODS_COUNT = 150
 # 在优化模式下，每次试验用于快速评估性能的回测期数 (数值越小优化越快)
-OPTIMIZATION_BACKTEST_PERIODS = 20
+OPTIMIZATION_BACKTEST_PERIODS = 30
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
-OPTIMIZATION_TRIALS = 100
+OPTIMIZATION_TRIALS = 20
 # 训练机器学习模型时，一个球号在历史数据中至少需要出现的次数 (防止样本过少导致模型不可靠)
 MIN_POSITIVE_SAMPLES_FOR_ML = 25
 
@@ -117,23 +117,23 @@ DEFAULT_WEIGHTS = {
 
     # --- 红球评分权重 ---
     # 红球历史总频率得分的权重
-    'FREQ_SCORE_WEIGHT': 28.19,
+    'FREQ_SCORE_WEIGHT': 5,
     # 红球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'OMISSION_SCORE_WEIGHT': 19.92,
+    'OMISSION_SCORE_WEIGHT': 10,
     # 红球当前遗漏与其历史最大遗漏比率的得分权重
-    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 16.12,
+    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 10,
     # 红球近期出现频率的得分权重
-    'RECENT_FREQ_SCORE_WEIGHT_RED': 15.71,
+    'RECENT_FREQ_SCORE_WEIGHT_RED': 5,
     # 红球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_RED': 22.43,
+    'ML_PROB_SCORE_WEIGHT_RED': 70,
 
     # --- 蓝球评分权重 ---
     # 蓝球历史总频率得分的权重
-    'BLUE_FREQ_SCORE_WEIGHT': 27.11,
+    'BLUE_FREQ_SCORE_WEIGHT': 5,
     # 蓝球当前遗漏值（与平均遗漏的偏差）得分的权重
-    'BLUE_OMISSION_SCORE_WEIGHT': 23.26,
+    'BLUE_OMISSION_SCORE_WEIGHT': 15,
     # 蓝球的机器学习模型预测出现概率的得分权重
-    'ML_PROB_SCORE_WEIGHT_BLUE': 43.48,
+    'ML_PROB_SCORE_WEIGHT_BLUE': 80,
 
     # --- 组合属性匹配奖励 ---
     # 推荐组合的红球奇数个数若与历史最常见模式匹配，获得的奖励分值
@@ -161,7 +161,7 @@ DEFAULT_WEIGHTS = {
 
     # --- 组合多样性控制 ---
     # 最终推荐的任意两注组合之间，其红球号码至少要有几个是不同的
-    'DIVERSITY_MIN_DIFFERENT_REDS': 3,
+    'DIVERSITY_MIN_DIFFERENT_REDS': 2,
 }
 
 # ==============================================================================
@@ -171,16 +171,16 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.04,              # 学习率：控制每次迭代的步长
-    'n_estimators': 100,                # 树的数量：总迭代次数
-    'num_leaves': 15,                   # 每棵树的最大叶子节点数：控制模型复杂度
+    'learning_rate': 0.2,              # 学习率：控制每次迭代的步长
+    'n_estimators': 150,                # 树的数量：总迭代次数
+    'num_leaves': 25,                   # 每棵树的最大叶子节点数：控制模型复杂度
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
-    'feature_fraction': 0.7,            # 特征采样比例：每次迭代随机选择70%的特征
-    'bagging_fraction': 0.8,            # 数据采样比例：每次迭代随机选择80%的数据
+    'feature_fraction': 0.8,            # 特征采样比例：每次迭代随机选择70%的特征
+    'bagging_fraction': 1,            # 数据采样比例：每次迭代随机选择80%的数据
     'bagging_freq': 5,                  # 数据采样的频率：每5次迭代进行一次
-    'seed': 42,                         # 随机种子：确保结果可复现
+    'seed': 0,                         # 随机种子：确保结果可复现
     'n_jobs': 1,                        # 并行线程数：设为1以在多进程环境中避免冲突
     'verbose': -1,                      # 控制台输出级别：-1表示静默
 }
