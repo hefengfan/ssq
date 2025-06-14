@@ -102,7 +102,7 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 10  # Reduced for speed
 # --- 默认权重配置 (这些参数可被Optuna优化) ---
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
-OPTIMAL_WEIGHTS = {
+DEFAULT_WEIGHTS = {
     # 基础权重
     'FREQ_SCORE_WEIGHT': 18.0,
     'OMISSION_SCORE_WEIGHT': 22.0,
