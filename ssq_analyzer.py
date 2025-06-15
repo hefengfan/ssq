@@ -36,8 +36,6 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import optuna
-from itertools import groupby
-from scipy.stats import gaussian_kde
 from lightgbm import LGBMClassifier
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
@@ -84,7 +82,7 @@ RED_ZONES = {'Zone1': (1, 11), 'Zone2': (12, 22), 'Zone3': (23, 33)}
 # --- 分析与执行参数配置 ---
 # --------------------------
 # 机器学习模型使用的滞后特征阶数 (e.g., 使用前1、3、5、10期的数据作为特征)
-ML_LAG_FEATURES = [1,3,5,10]  # Reduced lag features for speed
+ML_LAG_FEATURES = [1,2,3,5,8]  # Reduced lag features for speed
 # 用于生成乘积交互特征的特征对 (e.g., 红球和值 * 红球奇数个数)
 ML_INTERACTION_PAIRS = [('red_sum', 'red_odd_count')]
 # 用于生成自身平方交互特征的特征 (e.g., 红球跨度的平方)
@@ -96,7 +94,7 @@ BACKTEST_PERIODS_COUNT = 50  # Reduced backtest periods for speed
 # 在优化模式下，每次试验用于快速评估性能的回测期数 (数值越小优化越快)
 OPTIMIZATION_BACKTEST_PERIODS = 30  # Reduced backtest periods for optimization
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
-OPTIMIZATION_TRIALS = 25  # Reduced trials for speed
+OPTIMIZATION_TRIALS = 30  # Reduced trials for speed
 # 训练机器学习模型时，一个球号在历史数据中至少需要出现的次数 (防止样本过少导致模型不可靠)
 MIN_POSITIVE_SAMPLES_FOR_ML = 15  # Reduced for speed
 
@@ -105,39 +103,38 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 15  # Reduced for speed
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
-    "ODD_COUNT_SCORE_WEIGHT": 0.5,
-    "SPAN_SCORE_WEIGHT": 0.7,
-    "LOG_SUM_SCORE_WEIGHT": 0.6,
-  "FREQ_SCORE_WEIGHT": 9.539373754177896,
-  "OMISSION_SCORE_WEIGHT": 43.85327635017346,
-  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 47.86831520129507,
-  "RECENT_FREQ_SCORE_WEIGHT_RED": 29.435913862775735,
-  "ML_PROB_SCORE_WEIGHT_RED": 32.567606083129874,
-  "ML_PROB_SCORE_WEIGHT_BLUE": 53.11871689905171,
-  "BLUE_FREQ_SCORE_WEIGHT": 79.83530441081449,
-  "BLUE_OMISSION_SCORE_WEIGHT": 49.82955039844691,
-  "MEAN_SCORE_WEIGHT": 8.091493680586696,
-  "MEDIAN_SCORE_WEIGHT": 10.684742376339408,
-  "STD_SCORE_WEIGHT": 15.880957163038685,
-  "CONSECUTIVE_SCORE_WEIGHT": 11.285263271424668,
-  "SLANTED_SCORE_WEIGHT": 10.805550582325477,
-  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.22623078118304094,
-  "NUM_COMBINATIONS_TO_GENERATE": 15,
+  "ODD_COUNT_SCORE_WEIGHT": 0.5550886165287889,
+  "SPAN_SCORE_WEIGHT": 0.8594781386541879,
+  "LOG_SUM_SCORE_WEIGHT": 0.305175655683957,
+  "FREQ_SCORE_WEIGHT": 8.717033739191734,
+  "OMISSION_SCORE_WEIGHT": 41.73723232637827,
+  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 84.4678469393867,
+  "RECENT_FREQ_SCORE_WEIGHT_RED": 27.425173718029306,
+  "ML_PROB_SCORE_WEIGHT_RED": 21.491284946266298,
+  "ML_PROB_SCORE_WEIGHT_BLUE": 74.36543936033705,
+  "BLUE_FREQ_SCORE_WEIGHT": 52.35332471135969,
+  "BLUE_OMISSION_SCORE_WEIGHT": 99.55256287482982,
+  "MEAN_SCORE_WEIGHT": 8.354891141979365,
+  "MEDIAN_SCORE_WEIGHT": 10.623874723761334,
+  "STD_SCORE_WEIGHT": 31.416723697540824,
+  "CONSECUTIVE_SCORE_WEIGHT": 12.883515313502318,
+  "SLANTED_SCORE_WEIGHT": 5.670943125304048,
+  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.1997795549214139,
+  "NUM_COMBINATIONS_TO_GENERATE": 14,
   "TOP_N_RED_FOR_CANDIDATE": 25,
-  "TOP_N_BLUE_FOR_CANDIDATE": 28,
-  "ARM_MIN_SUPPORT": 0.009026703456460533,
-  "ARM_MIN_CONFIDENCE": 0.27854960186159244,
-  "ARM_MIN_LIFT": 1.5587152279687837,
-  "ARM_COMBINATION_BONUS_WEIGHT": 43.12535282862928,
-  "ARM_BONUS_LIFT_FACTOR": 0.6632406366369833,
-  "ARM_BONUS_CONF_FACTOR": 0.4379445986392404,
-  "DIVERSITY_MIN_DIFFERENT_REDS": 2,
-  "COMBINATION_ODD_COUNT_MATCH_BONUS": 13.131355096290902,
-  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.4139318229321857,
-  "COMBINATION_ZONE_MATCH_BONUS": 17.859835584463205,
-  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 2.361251707974992
+  "TOP_N_BLUE_FOR_CANDIDATE": 21,
+  "ARM_MIN_SUPPORT": 0.009157781376697628,
+  "ARM_MIN_CONFIDENCE": 0.4034979945480867,
+  "ARM_MIN_LIFT": 2.1523054066779737,
+  "ARM_COMBINATION_BONUS_WEIGHT": 37.38739608852477,
+  "ARM_BONUS_LIFT_FACTOR": 0.7581313703943285,
+  "ARM_BONUS_CONF_FACTOR": 0.4858987194564026,
+  "DIVERSITY_MIN_DIFFERENT_REDS": 4,
+  "COMBINATION_ODD_COUNT_MATCH_BONUS": 6.803372448472662,
+  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.7800087126478087,
+  "COMBINATION_ZONE_MATCH_BONUS": 30.88571654551663,
+  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 2.161603827789415
 }
-
 # ==============================================================================
 # --- 机器学习模型参数配置 ---
 # ==============================================================================
@@ -145,13 +142,13 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.2,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'learning_rate': 0.3,              # 学习率：控制每次迭代的步长 (increased slightly)
     'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
     'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
-    'feature_fraction': 0.8,            # 特征采样比例：每次迭代随机选择70%的特征
+    'feature_fraction': 0.9,            # 特征采样比例：每次迭代随机选择70%的特征
     'bagging_fraction': 1,            # 数据采样比例：每次迭代随机选择80%的数据
     'bagging_freq': 1,                  # 数据采样的频率：每5次迭代进行一次
     'seed': 0,                         # 随机种子：确保结果可复现
@@ -308,144 +305,67 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             continue
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
-
 def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
-    Enhanced feature engineering for Double Color Ball prediction with:
-    - Multi-period trend analysis (default lookback=10)
-    - Ball density distributions
-    - Comprehensive pattern movement features
-    - Advanced slanted pair analysis
-    - Historical probability features
-    
-    Parameters:
-        df: Input DataFrame with historical draw data
-        
-    Returns:
-        pd.DataFrame: Enhanced DataFrame with sophisticated features
+    Enhances the DataFrame with various derived features for Double Color Ball prediction.
+    Optimized for speed by:
+    1. Using vectorized operations where possible
+    2. Reducing redundant calculations
+    3. Minimizing apply operations
     """
     if df is None or df.empty:
         return None
     
     df_fe = df.copy()
     red_cols = [f'red{i+1}' for i in range(6)]
-    blue_col = 'blue'
     red_values = df_fe[red_cols].values
-    blue_values = df_fe[blue_col].values
     
-    # Basic statistical features
+    # Basic statistical features (vectorized operations)
     df_fe['red_sum'] = red_values.sum(axis=1)
     df_fe['red_span'] = red_values.max(axis=1) - red_values.min(axis=1)
     df_fe['red_odd_count'] = (red_values % 2 != 0).sum(axis=1)
     df_fe['red_even_count'] = 6 - df_fe['red_odd_count']
-    df_fe['red_mean'] = red_values.mean(axis=1).round(2)
+    df_fe['red_mean'] = red_values.mean(axis=1)
     df_fe['red_median'] = np.median(red_values, axis=1)
-    df_fe['red_std'] = red_values.std(axis=1).round(2)
-    df_fe['red_skew'] = pd.DataFrame(red_values).skew(axis=1).values
+    df_fe['red_std'] = red_values.std(axis=1)
     
-    # Zone distribution features (11 zones)
-    zone_bins = [1, 4, 8, 12, 16, 20, 24, 28]
-    for i in range(len(zone_bins)-1):
-        lower, upper = zone_bins[i], zone_bins[i+1]
-        df_fe[f'red_zone_{lower}_{upper}_count'] = ((red_values >= lower) & (red_values <= upper)).sum(axis=1)
+    # Zone features (optimized)
+    if hasattr(df_fe, 'RED_ZONES'):  # Make sure RED_ZONES is defined
+        for zone, (start, end) in RED_ZONES.items():
+            df_fe[f'red_{zone}_count'] = ((red_values >= start) & (red_values <= end)).sum(axis=1)
     
-    # Ball density estimation features
-    if len(df_fe) > 5:  # Only calculate if enough data
-        kde = gaussian_kde(red_values.flatten())
-        for i in range(1, 34):
-            df_fe[f'red_{i}_density'] = kde.evaluate(i)
+    # Shape features (consecutive numbers)
+    diffs = np.diff(red_values, axis=1)
+    df_fe['red_consecutive_count'] = (diffs == 1).sum(axis=1)
     
-    # Multi-period trend features (default lookback=10)
-    lookback_periods = 10
-    if len(df_fe) > lookback_periods:
-        for period in [3, 5, 10, 20]:
-            if len(df_fe) > period:
-                df_fe[f'red_sum_ma_{period}'] = df_fe['red_sum'].rolling(period).mean().round(2)
-                df_fe[f'red_span_ma_{period}'] = df_fe['red_span'].rolling(period).mean().round(2)
-                df_fe[f'red_odd_ma_{period}'] = df_fe['red_odd_count'].rolling(period).mean().round(2)
-                
-                for ball in range(1, 34):
-                    df_fe[f'red_{ball}_prob_{period}'] = (
-                        (red_values == ball).sum(axis=1).rolling(period).sum() / (6 * period)
-                    ).shift(1)
+    # Repeat features (number of repeated numbers from the previous period)
+    red_sets = [set(row) for row in red_values]
+    prev_red_sets = [set()] + red_sets[:-1]
+    df_fe['red_repeat_count'] = [len(current.intersection(prev)) for current, prev in zip(red_sets, prev_red_sets)]
     
-    # Advanced slanted pair analysis
+    # Blue ball features
+    blue_values = df_fe['blue'].values
+    df_fe['blue_is_odd'] = (blue_values % 2 != 0).astype(int)
+    df_fe['blue_is_large'] = (blue_values > 8).astype(int)
+    
+    # Log features
+    df_fe['red_log_sum'] = np.log1p(df_fe['red_sum'])
+    df_fe['red_log_avg'] = np.log1p(df_fe['red_mean'])
+    
+    # Sum of squares and absolute differences
+    df_fe['red_sum_sq'] = (red_values**2).sum(axis=1)
+    df_fe['red_abs_diff_sum'] = np.abs(diffs).sum(axis=1)
+    
+    # Slanted pairs feature (optimized)
     slanted_pairs = np.zeros(len(df_fe), dtype=int)
     for i in range(1, len(df_fe)):
         current = red_values[i]
         previous = red_values[i-1]
+        # Vectorized calculation of slanted pairs
         slanted_pairs[i] = np.sum(np.abs(np.subtract.outer(current, previous)) == 1)
     df_fe['red_slanted_pairs'] = slanted_pairs
     
-    # Consecutive number features
-    sorted_red = np.sort(red_values, axis=1)
-    diffs = np.diff(sorted_red, axis=1)
-    df_fe['red_consecutive_count'] = (diffs == 1).sum(axis=1)
-    df_fe['red_max_consecutive'] = np.array([
-        max(len(list(g)) for k, g in groupby(row) if k == 1) + 1 if 1 in row else 0 
-        for row in (diffs == 1)
-    ])
-    
-    # Repeat number features with decay factor
-    red_sets = [set(row) for row in red_values]
-    df_fe['red_repeat_count'] = 0
-    df_fe['red_repeat_decay'] = 0.0
-    for i in range(1, len(df_fe)):
-        repeat_counts = []
-        decay_factors = []
-        for j in range(1, min(i, lookback_periods) + 1):
-            common = len(red_sets[i].intersection(red_sets[i-j]))
-            repeat_counts.append(common)
-            decay_factors.append(common * (0.9 ** j))
-        df_fe.at[i, 'red_repeat_count'] = np.mean(repeat_counts) if repeat_counts else 0
-        df_fe.at[i, 'red_repeat_decay'] = np.sum(decay_factors) if decay_factors else 0
-    
-    # Blue ball features
-    df_fe['blue_is_odd'] = (blue_values % 2 != 0).astype(int)
-    df_fe['blue_is_large'] = (blue_values > 8).astype(int)
-    df_fe['blue_zone'] = pd.cut(blue_values, bins=[0, 4, 8, 12, 16], labels=False) + 1
-    
-    # AC value (Alternating Combination value)
-    df_fe['red_ac_value'] = df_fe[red_cols].apply(
-        lambda row: len(set(abs(x - y) for i, x in enumerate(sorted(row)) 
-                          for j, y in enumerate(sorted(row)) if j > i)) - 5,
-        axis=1
-    )
-    
-    # Prime number features
-    primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
-    df_fe['red_prime_count'] = np.isin(red_values, primes).sum(axis=1)
-    
-    # Tail number features
-    for digit in range(10):
-        df_fe[f'red_tail_{digit}_count'] = (red_values % 10 == digit).sum(axis=1)
-    
-    # Cluster score feature
-    cluster_scores = []
-    for row in red_values:
-        sorted_row = np.sort(row)
-        gaps = np.diff(sorted_row)
-        cluster_scores.append(np.sum(1 / (gaps + 1)))
-    df_fe['red_cluster_score'] = cluster_scores
-    
     return df_fe
-
-def calculate_ac_value(red_balls: np.ndarray) -> int:
-    """Calculate Alternating Combination value for red balls"""
-    sorted_balls = np.sort(red_balls)
-    pairs = [(x, y) for i, x in enumerate(sorted_balls) 
-             for j, y in enumerate(sorted_balls) if j > i]
-    return len(set(abs(x - y) for x, y in pairs)) - (6 - 1)
-
-def calculate_cluster_score(red_values: np.ndarray) -> np.ndarray:
-    """Calculate cluster score based on number density"""
-    cluster_scores = []
-    for row in red_values:
-        sorted_row = np.sort(row)
-        gaps = np.diff(sorted_row)
-        cluster_score = np.sum(1 / (gaps + 1))  # +1 to avoid division by zero
-        cluster_scores.append(cluster_score)
-    return np.array(cluster_scores)
 
 def create_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """
