@@ -58,7 +58,7 @@ PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu_processed.csv')
 # 运行模式配置:
 # True  -> 运行参数优化，耗时较长，但可能找到更优策略。
 # False -> 使用默认权重进行快速分析和推荐。
-ENABLE_OPTUNA_OPTIMIZATION = True  # Changed to False for faster execution
+ENABLE_OPTUNA_OPTIMIZATION = False  # Changed to False for faster execution
 
 # --------------------------
 # --- 策略开关配置 ---
@@ -103,49 +103,34 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 10  # Reduced for speed
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
-    # 基础权重
-    'FREQ_SCORE_WEIGHT': 18.0,
-    'OMISSION_SCORE_WEIGHT': 22.0,
-    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 25.0,
-    'RECENT_FREQ_SCORE_WEIGHT_RED': 25.0,
-    
-    # 机器学习权重 (显著提高)
-    'ML_PROB_SCORE_WEIGHT_RED': 45.0,
-    'ML_PROB_SCORE_WEIGHT_BLUE': 85.0,
-    
-    # 蓝球权重
-    'BLUE_FREQ_SCORE_WEIGHT': 40.0,
-    'BLUE_OMISSION_SCORE_WEIGHT': 25.0,
-    
-    # 统计特征权重
-    'MEAN_SCORE_WEIGHT': 8.0,
-    'MEDIAN_SCORE_WEIGHT': 8.0,
-    'STD_SCORE_WEIGHT': 8.0,
-    'CONSECUTIVE_SCORE_WEIGHT': 8.0,
-    'SLANTED_SCORE_WEIGHT': 8.0,
-    
-    # 组合优化参数
-    'FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT': 0.3,
-    'NUM_COMBINATIONS_TO_GENERATE': 15,
-    'TOP_N_RED_FOR_CANDIDATE': 20,
-    'TOP_N_BLUE_FOR_CANDIDATE': 25,
-    
-    # 关联规则挖掘参数
-    'ARM_MIN_SUPPORT': 0.01,
-    'ARM_MIN_CONFIDENCE': 0.55,
-    'ARM_MIN_LIFT': 2.0,
-    'ARM_COMBINATION_BONUS_WEIGHT': 30.0,
-    'ARM_BONUS_LIFT_FACTOR': 0.45,
-    'ARM_BONUS_CONF_FACTOR': 0.3,
-    
-    # 多样性参数
-    'DIVERSITY_MIN_DIFFERENT_REDS': 2,
-    
-    # 组合匹配奖励
-    'COMBINATION_ODD_COUNT_MATCH_BONUS': 25.0,
-    'COMBINATION_BLUE_ODD_MATCH_BONUS': 0.8,
-    'COMBINATION_ZONE_MATCH_BONUS': 18.0,
-    'COMBINATION_BLUE_SIZE_MATCH_BONUS': 1.2
+  "FREQ_SCORE_WEIGHT": 9.539373754177896,
+  "OMISSION_SCORE_WEIGHT": 43.85327635017346,
+  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 47.86831520129507,
+  "RECENT_FREQ_SCORE_WEIGHT_RED": 29.435913862775735,
+  "ML_PROB_SCORE_WEIGHT_RED": 32.567606083129874,
+  "ML_PROB_SCORE_WEIGHT_BLUE": 53.11871689905171,
+  "BLUE_FREQ_SCORE_WEIGHT": 79.83530441081449,
+  "BLUE_OMISSION_SCORE_WEIGHT": 49.82955039844691,
+  "MEAN_SCORE_WEIGHT": 8.091493680586696,
+  "MEDIAN_SCORE_WEIGHT": 10.684742376339408,
+  "STD_SCORE_WEIGHT": 15.880957163038685,
+  "CONSECUTIVE_SCORE_WEIGHT": 11.285263271424668,
+  "SLANTED_SCORE_WEIGHT": 10.805550582325477,
+  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.22623078118304094,
+  "NUM_COMBINATIONS_TO_GENERATE": 15,
+  "TOP_N_RED_FOR_CANDIDATE": 25,
+  "TOP_N_BLUE_FOR_CANDIDATE": 28,
+  "ARM_MIN_SUPPORT": 0.009026703456460533,
+  "ARM_MIN_CONFIDENCE": 0.27854960186159244,
+  "ARM_MIN_LIFT": 1.5587152279687837,
+  "ARM_COMBINATION_BONUS_WEIGHT": 43.12535282862928,
+  "ARM_BONUS_LIFT_FACTOR": 0.6632406366369833,
+  "ARM_BONUS_CONF_FACTOR": 0.4379445986392404,
+  "DIVERSITY_MIN_DIFFERENT_REDS": 2,
+  "COMBINATION_ODD_COUNT_MATCH_BONUS": 13.131355096290902,
+  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.4139318229321857,
+  "COMBINATION_ZONE_MATCH_BONUS": 17.859835584463205,
+  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 2.361251707974992
 }
 
 # ==============================================================================
@@ -155,9 +140,9 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.3,              # 学习率：控制每次迭代的步长 (increased slightly)
-    'n_estimators': 80,                # 树的数量：总迭代次数 (reduced)
-    'num_leaves': 20,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
+    'learning_rate': 0.5,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
+    'num_leaves': 25,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 20,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
