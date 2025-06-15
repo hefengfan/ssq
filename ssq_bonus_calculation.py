@@ -10,11 +10,118 @@
 """
 
 # ... [保留原有的配置区和工具函数部分] ...
+import os
+import re
+import glob
+import csv
+from itertools import combinations
+from datetime import datetime
+import traceback
+from typing import Optional, Tuple, List, Dict # <--- [FIX] 导入兼容的类型提示
 
+# ==============================================================================
+# --- 配置区 ---
+# ==============================================================================
+
+# 脚本需要查找的分析报告文件名的模式
+REPORT_PATTERN = "ssq_analysis_output_*.txt"
+# 开奖数据源CSV文件
+CSV_FILE = "shuangseqiu.csv"
+# 最终生成的主评估报告文件名
+MAIN_REPORT_FILE = "latest_ssq_calculation.txt"
+
+# 主报告文件中保留的最大记录数
+MAX_NORMAL_RECORDS = 10  # 保留最近10次评估
+MAX_ERROR_LOGS = 20      # 保留最近20条错误日志
+
+# 奖金对照表 (元)
+PRIZE_TABLE = {
+    1: 5_000_000,  # 一等奖 (浮动，此处为估算)
+    2: 150_000,    # 二等奖 (浮动，此处为估算)
+    3: 3_000,      # 三等奖
+    4: 200,        # 四等奖
+    5: 10,         # 五等奖
+    6: 5,          # 六等奖
+}
+
+# ==============================================================================
+# --- 工具函数 ---
+# ==============================================================================
+
+def log_message(message: str, level: str = "INFO"):
+    """一个简单的日志打印函数，用于在控制台显示脚本执行状态。"""
+    print(f"[{level}] {datetime.now().strftime('%H:%M:%S')} - {message}")
+
+def robust_file_read(file_path: str) -> Optional[str]: # <--- [FIX] 使用 Optional[str] 替代 str | None
+    """
+    一个健壮的文件读取函数，能自动尝试多种编码格式。
+
+    Args:
+        file_path (str): 待读取文件的路径。
+
+    Returns:
+        Optional[str]: 文件内容字符串，如果失败则返回 None。
+    """
+    if not os.path.exists(file_path):
+        log_message(f"文件未找到: {file_path}", "ERROR")
+        return None
+    encodings = ['utf-8', 'gbk', 'latin-1']
+    for encoding in encodings:
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                return f.read()
+        except (UnicodeDecodeError, IOError):
+            continue
+    log_message(f"无法使用任何支持的编码打开文件: {file_path}", "ERROR")
+    return None
 # ==============================================================================
 # --- 数据解析与查找模块 (修改部分) ---
 # ==============================================================================
+# ==============================================================================
+# --- 数据解析与查找模块 ---
+# ==============================================================================
 
+def get_period_data_from_csv(csv_content: str) -> Tuple[Optional[Dict], Optional[List]]: # <--- [FIX] 使用 Tuple 和 Optional 替代
+    """
+    从CSV文件内容中解析出所有期号的开奖数据。
+
+    Args:
+        csv_content (str): 从CSV文件读取的字符串内容。
+
+    Returns:
+        Tuple[Optional[Dict], Optional[List]]:
+            - 一个以期号为键，开奖数据为值的字典。
+            - 一个按升序排序的期号列表。
+            如果解析失败则返回 (None, None)。
+    """
+    if not csv_content:
+        log_message("输入的CSV内容为空。", "WARNING")
+        return None, None
+    period_map, periods_list = {}, []
+    try:
+        reader = csv.reader(csv_content.splitlines())
+        next(reader)  # 跳过表头
+        for i, row in enumerate(reader):
+            if len(row) >= 4 and re.match(r'^\d{4,7}$', row[0]):
+                try:
+                    period, date, red_str, blue_str = row[0], row[1], row[2], row[3]
+                    red_balls = sorted(map(int, red_str.split(',')))
+                    blue_ball = int(blue_str)
+                    if len(red_balls) != 6 or not all(1 <= r <= 33 for r in red_balls) or not (1 <= blue_ball <= 16):
+                        continue
+                    period_map[period] = {'date': date, 'red': red_balls, 'blue': blue_ball}
+                    periods_list.append(period)
+                except (ValueError, IndexError):
+                    log_message(f"CSV文件第 {i+2} 行数据格式无效，已跳过: {row}", "WARNING")
+    except Exception as e:
+        log_message(f"解析CSV数据时发生严重错误: {e}", "ERROR")
+        return None, None
+    
+    if not period_map:
+        log_message("未能从CSV中解析到任何有效的开奖数据。", "WARNING")
+        return None, None
+        
+    return period_map, sorted(periods_list, key=int)
 def find_matching_report(target_period: str) -> Optional[str]:
     """
     改进版：在当前目录查找其数据截止期与 `target_period` 匹配的最新分析报告。
