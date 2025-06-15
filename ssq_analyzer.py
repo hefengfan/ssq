@@ -92,11 +92,11 @@ RECENT_FREQ_WINDOW = 20  # Reduced window size for speed
 # 在分析模式下，进行策略回测时所评估的总期数
 BACKTEST_PERIODS_COUNT = 50  # Reduced backtest periods for speed
 # 在优化模式下，每次试验用于快速评估性能的回测期数 (数值越小优化越快)
-OPTIMIZATION_BACKTEST_PERIODS = 20  # Reduced backtest periods for optimization
+OPTIMIZATION_BACKTEST_PERIODS = 30  # Reduced backtest periods for optimization
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
-OPTIMIZATION_TRIALS = 50  # Reduced trials for speed
+OPTIMIZATION_TRIALS = 25  # Reduced trials for speed
 # 训练机器学习模型时，一个球号在历史数据中至少需要出现的次数 (防止样本过少导致模型不可靠)
-MIN_POSITIVE_SAMPLES_FOR_ML = 25  # Reduced for speed
+MIN_POSITIVE_SAMPLES_FOR_ML = 15  # Reduced for speed
 
 # ==============================================================================
 # --- 默认权重配置 (这些参数可被Optuna优化) ---
