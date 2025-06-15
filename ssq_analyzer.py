@@ -31,12 +31,12 @@ from collections import Counter
 from contextlib import redirect_stdout
 from typing import (Union, Optional, List, Dict, Tuple, Any)
 from functools import partial
-from itertools import combinations
-from math import gcd
+
 # --- 第三方库导入 ---
 import numpy as np
 import pandas as pd
 import optuna
+from scipy.stats import gaussian_kde
 from lightgbm import LGBMClassifier
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
@@ -104,37 +104,37 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 15  # Reduced for speed
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
-  "ODD_COUNT_SCORE_WEIGHT": 0.5550886165287889,
-  "SPAN_SCORE_WEIGHT": 0.8594781386541879,
-  "LOG_SUM_SCORE_WEIGHT": 0.305175655683957,
-  "FREQ_SCORE_WEIGHT": 8.717033739191734,
-  "OMISSION_SCORE_WEIGHT": 41.73723232637827,
-  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 84.4678469393867,
-  "RECENT_FREQ_SCORE_WEIGHT_RED": 27.425173718029306,
-  "ML_PROB_SCORE_WEIGHT_RED": 21.491284946266298,
-  "ML_PROB_SCORE_WEIGHT_BLUE": 74.36543936033705,
-  "BLUE_FREQ_SCORE_WEIGHT": 52.35332471135969,
-  "BLUE_OMISSION_SCORE_WEIGHT": 99.55256287482982,
-  "MEAN_SCORE_WEIGHT": 8.354891141979365,
-  "MEDIAN_SCORE_WEIGHT": 10.623874723761334,
-  "STD_SCORE_WEIGHT": 31.416723697540824,
-  "CONSECUTIVE_SCORE_WEIGHT": 12.883515313502318,
-  "SLANTED_SCORE_WEIGHT": 5.670943125304048,
-  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.1997795549214139,
-  "NUM_COMBINATIONS_TO_GENERATE": 14,
+    "ODD_COUNT_SCORE_WEIGHT": 0.5,
+    "SPAN_SCORE_WEIGHT": 0.7,
+    "LOG_SUM_SCORE_WEIGHT": 0.6,
+  "FREQ_SCORE_WEIGHT": 9.539373754177896,
+  "OMISSION_SCORE_WEIGHT": 43.85327635017346,
+  "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 47.86831520129507,
+  "RECENT_FREQ_SCORE_WEIGHT_RED": 29.435913862775735,
+  "ML_PROB_SCORE_WEIGHT_RED": 32.567606083129874,
+  "ML_PROB_SCORE_WEIGHT_BLUE": 53.11871689905171,
+  "BLUE_FREQ_SCORE_WEIGHT": 79.83530441081449,
+  "BLUE_OMISSION_SCORE_WEIGHT": 49.82955039844691,
+  "MEAN_SCORE_WEIGHT": 8.091493680586696,
+  "MEDIAN_SCORE_WEIGHT": 10.684742376339408,
+  "STD_SCORE_WEIGHT": 15.880957163038685,
+  "CONSECUTIVE_SCORE_WEIGHT": 11.285263271424668,
+  "SLANTED_SCORE_WEIGHT": 10.805550582325477,
+  "FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT": 0.22623078118304094,
+  "NUM_COMBINATIONS_TO_GENERATE": 15,
   "TOP_N_RED_FOR_CANDIDATE": 25,
-  "TOP_N_BLUE_FOR_CANDIDATE": 21,
-  "ARM_MIN_SUPPORT": 0.009157781376697628,
-  "ARM_MIN_CONFIDENCE": 0.4034979945480867,
-  "ARM_MIN_LIFT": 2.1523054066779737,
-  "ARM_COMBINATION_BONUS_WEIGHT": 37.38739608852477,
-  "ARM_BONUS_LIFT_FACTOR": 0.7581313703943285,
-  "ARM_BONUS_CONF_FACTOR": 0.4858987194564026,
-  "DIVERSITY_MIN_DIFFERENT_REDS": 4,
-  "COMBINATION_ODD_COUNT_MATCH_BONUS": 6.803372448472662,
-  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.7800087126478087,
-  "COMBINATION_ZONE_MATCH_BONUS": 30.88571654551663,
-  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 2.161603827789415
+  "TOP_N_BLUE_FOR_CANDIDATE": 28,
+  "ARM_MIN_SUPPORT": 0.009026703456460533,
+  "ARM_MIN_CONFIDENCE": 0.27854960186159244,
+  "ARM_MIN_LIFT": 1.5587152279687837,
+  "ARM_COMBINATION_BONUS_WEIGHT": 43.12535282862928,
+  "ARM_BONUS_LIFT_FACTOR": 0.6632406366369833,
+  "ARM_BONUS_CONF_FACTOR": 0.4379445986392404,
+  "DIVERSITY_MIN_DIFFERENT_REDS": 2,
+  "COMBINATION_ODD_COUNT_MATCH_BONUS": 13.131355096290902,
+  "COMBINATION_BLUE_ODD_MATCH_BONUS": 0.4139318229321857,
+  "COMBINATION_ZONE_MATCH_BONUS": 17.859835584463205,
+  "COMBINATION_BLUE_SIZE_MATCH_BONUS": 2.361251707974992
 }
 
 # ==============================================================================
@@ -144,7 +144,7 @@ DEFAULT_WEIGHTS = {
 LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
-    'learning_rate': 0.3,              # 学习率：控制每次迭代的步长 (increased slightly)
+    'learning_rate': 0.2,              # 学习率：控制每次迭代的步长 (increased slightly)
     'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
     'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
@@ -308,210 +308,163 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
 
-def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[pd.DataFrame]:
     """
-    双色球专业特征工程（严格模式）
-    特征包含：
-    1. 全历史斜连特征（不限期数）
-    2. 精确对数特征
-    3. 位置走势特征
-    4. 红蓝球关联特征
+    Enhanced feature engineering for Double Color Ball prediction with:
+    - Multi-period trend analysis
+    - Ball density distributions
+    - Comprehensive pattern movement features
+    - Advanced slanted pair analysis
+    - Historical probability features
     
-    要求：
-    - 不修改函数内部已定义变量
-    - 不使用未定义变量
-    - 全历史期斜连检测
+    Parameters:
+        df: Input DataFrame with historical draw data
+        lookback_periods: Number of historical periods to consider for trend features
+        
+    Returns:
+        pd.DataFrame: Enhanced DataFrame with sophisticated features
     """
     if df is None or df.empty:
         return None
     
-    # 复制数据避免修改原DataFrame
     df_fe = df.copy()
+    red_cols = [f'red{i+1}' for i in range(6)]
+    blue_col = 'blue'
+    red_values = df_fe[red_cols].values
+    blue_values = df_fe[blue_col].values
     
-    # 定义红球和蓝球列名（不修改内部变量）
-    red_columns = [f'red{i+1}' for i in range(6)]
-    blue_column = 'blue'
+    # Basic statistical features (optimized)
+    df_fe['red_sum'] = red_values.sum(axis=1)
+    df_fe['red_span'] = red_values.max(axis=1) - red_values.min(axis=1)
+    df_fe['red_odd_count'] = (red_values % 2 != 0).sum(axis=1)
+    df_fe['red_even_count'] = 6 - df_fe['red_odd_count']
+    df_fe['red_mean'] = red_values.mean(axis=1).round(2)
+    df_fe['red_median'] = np.median(red_values, axis=1)
+    df_fe['red_std'] = red_values.std(axis=1).round(2)
+    df_fe['red_skew'] = pd.DataFrame(red_values).skew(axis=1).values
     
-    # 获取红球和蓝球值（不修改内部变量）
-    red_balls = df_fe[red_columns].values
-    blue_balls = df_fe[blue_column].values
+    # Zone distribution features (11 zones)
+    zone_bins = [1, 4, 8, 12, 16, 20, 24, 28]
+    for i in range(len(zone_bins)-1):
+        lower, upper = zone_bins[i], zone_bins[i+1]
+        df_fe[f'red_zone_{lower}_{upper}_count'] = ((red_values >= lower) & (red_values <= upper)).sum(axis=1)
     
-    # ============== 全历史斜连特征 ==============
-    def find_all_slant_numbers(current_reds, all_previous_reds):
-        """
-        查找当前期与所有历史期的斜连号
-        返回：
-        - total_slant: 总斜连次数
-        - max_slant_streak: 最大连续斜连期数
-        - slant_directions: 斜连方向统计（上斜/下斜）
-        """
-        slant_stats = {
-            'total_slant': 0,
-            'max_slant_streak': 0,
-            'up_slant': 0,
-            'down_slant': 0
-        }
-        
-        current_streak = 0
-        max_streak = 0
-        
-        for prev_reds in all_previous_reds:
-            has_slant = False
+    # Ball density estimation features
+    for i in range(1, 34):
+        df_fe[f'red_{i}_density'] = 0
+        if len(df_fe) > 5:  # Need enough data for KDE
+            kde = gaussian_kde(red_values.flatten())
+            df_fe[f'red_{i}_density'] = kde.evaluate(i)
+    
+    # Multi-period trend features
+    for period in [3, 5, 10, 20]:
+        if len(df_fe) > period:
+            # Rolling statistics
+            df_fe[f'red_sum_ma_{period}'] = df_fe['red_sum'].rolling(period).mean().round(2)
+            df_fe[f'red_span_ma_{period}'] = df_fe['red_span'].rolling(period).mean().round(2)
+            df_fe[f'red_odd_ma_{period}'] = df_fe['red_odd_count'].rolling(period).mean().round(2)
             
-            # 检测上斜(+1)和下斜(-1)
-            for num in current_reds:
-                if (num - 1) in prev_reds:
-                    slant_stats['down_slant'] += 1
-                    has_slant = True
-                if (num + 1) in prev_reds:
-                    slant_stats['up_slant'] += 1
-                    has_slant = True
-            
-            # 更新连续斜连计数
-            if has_slant:
-                current_streak += 1
-                max_streak = max(max_streak, current_streak)
-                slant_stats['total_slant'] += 1
-            else:
-                current_streak = 0
-                
-        slant_stats['max_slant_streak'] = max_streak
-        return slant_stats
+            # Rolling probability of each red ball
+            for ball in range(1, 34):
+                df_fe[f'red_{ball}_prob_{period}'] = (
+                    (red_values == ball).sum(axis=1).rolling(period).sum() / (6 * period)
+                ).shift(1)
     
-    # 初始化斜连特征列
-    df_fe['total_slant'] = 0
-    df_fe['max_slant_streak'] = 0
-    df_fe['up_slant'] = 0
-    df_fe['down_slant'] = 0
+    # Advanced slanted pair analysis
+    slanted_pairs = np.zeros(len(df_fe), dtype=int)
+    slanted_pair_details = [[] for _ in range(len(df_fe))]
     
-    # 计算全历史斜连特征
-    all_previous = []
-    for i in range(len(df_fe)):
-        if i > 0:
-            stats = find_all_slant_numbers(red_balls[i], all_previous)
-            df_fe.at[i, 'total_slant'] = stats['total_slant']
-            df_fe.at[i, 'max_slant_streak'] = stats['max_slant_streak']
-            df_fe.at[i, 'up_slant'] = stats['up_slant']
-            df_fe.at[i, 'down_slant'] = stats['down_slant']
-        all_previous.append(red_balls[i])
+    for i in range(1, len(df_fe)):
+        current = red_values[i]
+        previous = red_values[i-1]
+        diff_matrix = np.abs(np.subtract.outer(current, previous))
+        slanted_pairs[i] = np.sum(diff_matrix == 1)
+        
+        # Record specific slanted pairs
+        pairs = []
+        for c in current:
+            for p in previous:
+                if abs(c - p) == 1:
+                    pairs.append(f"{min(c,p)}-{max(c,p)}")
+        slanted_pair_details[i] = '|'.join(pairs) if pairs else 'None'
     
-    # ============== 精确对数特征 ==============
-    def calculate_pair_features(red_numbers):
-        """
-        计算单期对数特征：
-        - ac_value: AC值（数字复杂度）
-        - same_tail: 同尾对数
-        - prime_pairs: 质数对数
-        - consecutive_pairs: 连号对数
-        """
-        sorted_reds = sorted(red_numbers)
-        
-        # AC值计算
-        diffs = [abs(a-b) for a,b in combinations(sorted_reds, 2)]
-        ac_value = len(set(diffs)) - 5
-        
-        # 同尾对数
-        same_tail = len([1 for a,b in combinations(red_numbers, 2) 
-                        if a%10 == b%10])
-        
-        # 质数对数
-        def is_prime(n):
-            return n > 1 and all(n%i !=0 for i in range(2, int(n**0.5)+1))
-            
-        prime_pairs = len([1 for a,b in combinations(red_numbers, 2) 
-                          if is_prime(a) and is_prime(b)])
-        
-        # 连号对数
-        consecutive_pairs = len([1 for a,b in zip(sorted_reds, sorted_reds[1:]) 
-                                if b-a == 1])
-        
-        return {
-            'ac_value': ac_value,
-            'same_tail': same_tail,
-            'prime_pairs': prime_pairs,
-            'consecutive_pairs': consecutive_pairs
-        }
+    df_fe['red_slanted_pairs'] = slanted_pairs
+    df_fe['red_slanted_pair_details'] = slanted_pair_details
     
-    # 计算对数特征
-    pair_features = ['ac_value', 'same_tail', 'prime_pairs', 'consecutive_pairs']
-    for feat in pair_features:
-        df_fe[feat] = 0
-        
-    for i in range(len(df_fe)):
-        res = calculate_pair_features(red_balls[i])
-        for k, v in res.items():
-            df_fe.at[i, k] = v
+    # Consecutive number features
+    diffs = np.diff(np.sort(red_values, axis=1), axis=1)
+    df_fe['red_consecutive_count'] = (diffs == 1).sum(axis=1)
+    df_fe['red_max_consecutive'] = np.array([
+        max(len(list(g)) for k, g in groupby(row) if k == 1) + 1 
+        if 1 in row else 0 
+        for row in (diffs == 1)
+    ])
     
-    # ============== 位置走势特征 ==============
-    def add_position_features(df, red_cols):
-        """
-        添加每个红球位置的特征：
-        - posX_trend: 5期移动平均
-        - posX_freq: 10期出现频率
-        - posX_delta: 与上期差值
-        """
-        for col in red_cols:
-            # 5期移动平均趋势
-            df[f'{col}_trend'] = df[col].rolling(5).mean()
-            
-            # 10期出现频率
-            df[f'{col}_freq'] = df[col].rolling(10).apply(
-                lambda x: x.value_counts().iloc[0] if not x.empty else 0
+    # Repeat number features with decay factor
+    red_sets = [set(row) for row in red_values]
+    for i in range(1, len(df_fe)):
+        repeat_counts = []
+        decay_factors = []
+        for j in range(1, min(i, lookback_periods) + 1):
+            common = len(red_sets[i].intersection(red_sets[i-j]))
+            repeat_counts.append(common)
+            decay_factors.append(common * (0.9 ** j))
+        df_fe.at[i, 'red_repeat_avg'] = np.mean(repeat_counts) if repeat_counts else 0
+        df_fe.at[i, 'red_repeat_decay'] = np.sum(decay_factors) if decay_factors else 0
+    
+    # Blue ball features with trend analysis
+    df_fe['blue_is_odd'] = (blue_values % 2 != 0).astype(int)
+    df_fe['blue_is_large'] = (blue_values > 8).astype(int)
+    df_fe['blue_zone'] = pd.cut(blue_values, bins=[0, 4, 8, 12, 16], labels=False) + 1
+    
+    for period in [5, 10, 20]:
+        if len(df_fe) > period:
+            df_fe[f'blue_ma_{period}'] = blue_values.rolling(period).mean().round(2)
+            df_fe[f'blue_odd_ratio_{period}'] = (
+                df_fe['blue_is_odd'].rolling(period).mean().round(2)
             )
-            
-            # 与上期差值
-            df[f'{col}_delta'] = df[col].diff()
-            
-        return df
     
-    df_fe = add_position_features(df_fe, red_columns)
-    
-    # ============== 红蓝球关联特征 ==============
-    def add_blue_red_features(df, red_cols, blue_col):
-        """
-        添加红蓝球关联特征：
-        - blue_red_diff: 蓝球与红球平均值的差值
-        - blue_red_tail: 蓝球与红球同尾匹配
-        - blue_in_red_zone: 蓝球是否在红球区间内
-        """
-        red_values = df[red_cols].values
-        
-        # 蓝球与红球平均值的差值
-        df['blue_red_diff'] = df[blue_col] - red_values.mean(axis=1)
-        
-        # 蓝球与红球同尾匹配
-        df['blue_red_tail'] = [any(blue%10 == red%10 for red in reds) 
-                              for blue, reds in zip(df[blue_col], red_values)]
-        df['blue_red_tail'] = df['blue_red_tail'].astype(int)
-        
-        # 蓝球是否在红球区间内
-        df['blue_in_red_zone'] = [
-            (blue > min(reds)) & (blue < max(reds)) 
-            for blue, reds in zip(df[blue_col], red_values)
-        ]
-        df['blue_in_red_zone'] = df['blue_in_red_zone'].astype(int)
-        
-        return df
-    
-    df_fe = add_blue_red_features(df_fe, red_columns, blue_column)
-    
-    # ============== 组合特征 ==============
-    # 斜连强度综合指标
-    df_fe['slant_composite'] = (
-        0.6 * df_fe['total_slant'] + 
-        0.3 * df_fe['max_slant_streak'] + 
-        0.1 * (df_fe['up_slant'] - df_fe['down_slant'])
+    # AC value (Alternating Combination value)
+    df_fe['red_ac_value'] = df_fe.apply(
+        lambda row: calculate_ac_value(row[red_cols]), axis=1
     )
     
-    # 对数特征综合指标
-    df_fe['pair_composite'] = (
-        0.4 * df_fe['ac_value'] + 
-        0.3 * df_fe['same_tail'] + 
-        0.2 * df_fe['prime_pairs'] + 
-        0.1 * df_fe['consecutive_pairs']
-    )
+    # Prime number features
+    primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+    df_fe['red_prime_count'] = np.isin(red_values, primes).sum(axis=1)
+    
+    # Tail number features (last digit)
+    for digit in range(10):
+        df_fe[f'red_tail_{digit}_count'] = (red_values % 10 == digit).sum(axis=1)
+    
+    # Number clustering features
+    df_fe['red_cluster_score'] = calculate_cluster_score(red_values)
+    
+    # Time interval features (days between draws)
+    if 'date' in df_fe.columns:
+        df_fe['date'] = pd.to_datetime(df_fe['date'])
+        df_fe['days_since_last'] = df_fe['date'].diff().dt.days
+        df_fe['draw_interval'] = df_fe['days_since_last'].fillna(0).astype(int)
     
     return df_fe
+
+def calculate_ac_value(red_balls: np.ndarray) -> int:
+    """Calculate Alternating Combination value for red balls"""
+    sorted_balls = np.sort(red_balls)
+    pairs = [(x, y) for i, x in enumerate(sorted_balls) 
+             for j, y in enumerate(sorted_balls) if j > i]
+    return len(set(abs(x - y) for x, y in pairs)) - (6 - 1)
+
+def calculate_cluster_score(red_values: np.ndarray) -> np.ndarray:
+    """Calculate cluster score based on number density"""
+    cluster_scores = []
+    for row in red_values:
+        sorted_row = np.sort(row)
+        gaps = np.diff(sorted_row)
+        cluster_score = np.sum(1 / (gaps + 1))  # +1 to avoid division by zero
+        cluster_scores.append(cluster_score)
+    return np.array(cluster_scores)
+
 def create_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """
     Creates lagged features and interaction features for the machine learning model.
