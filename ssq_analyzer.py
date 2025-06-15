@@ -88,7 +88,7 @@ ML_INTERACTION_PAIRS = [('red_sum', 'red_odd_count')]
 # 用于生成自身平方交互特征的特征 (e.g., 红球跨度的平方)
 ML_INTERACTION_SELF = ['red_span']
 # 计算号码“近期”出现频率时所参考的期数窗口大小
-RECENT_FREQ_WINDOW = 30  # Reduced window size for speed
+RECENT_FREQ_WINDOW = 15  # Reduced window size for speed
 # 在分析模式下，进行策略回测时所评估的总期数
 BACKTEST_PERIODS_COUNT = 50  # Reduced backtest periods for speed
 # 在优化模式下，每次试验用于快速评估性能的回测期数 (数值越小优化越快)
@@ -96,7 +96,7 @@ OPTIMIZATION_BACKTEST_PERIODS = 15  # Reduced backtest periods for optimization
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
 OPTIMIZATION_TRIALS = 25  # Reduced trials for speed
 # 训练机器学习模型时，一个球号在历史数据中至少需要出现的次数 (防止样本过少导致模型不可靠)
-MIN_POSITIVE_SAMPLES_FOR_ML = 10  # Reduced for speed
+MIN_POSITIVE_SAMPLES_FOR_ML = 20  # Reduced for speed
 
 # ==============================================================================
 # --- 默认权重配置 (这些参数可被Optuna优化) ---
@@ -141,9 +141,9 @@ LGBM_PARAMS = {
     'objective': 'binary',              # 目标函数：二分类问题（预测一个球号是否出现）
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
     'learning_rate': 0.5,              # 学习率：控制每次迭代的步长 (increased slightly)
-    'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
-    'num_leaves': 25,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
-    'min_child_samples': 20,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
+    'n_estimators': 80,                # 树的数量：总迭代次数 (reduced)
+    'num_leaves': 20,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
+    'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
     'feature_fraction': 0.8,            # 特征采样比例：每次迭代随机选择70%的特征
