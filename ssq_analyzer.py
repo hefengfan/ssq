@@ -36,6 +36,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import optuna
+from itertools import groupby
 from scipy.stats import gaussian_kde
 from lightgbm import LGBMClassifier
 from mlxtend.preprocessing import TransactionEncoder
@@ -308,10 +309,10 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             
     return pd.DataFrame(parsed_rows) if parsed_rows else None
 
-def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[pd.DataFrame]:
+def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     Enhanced feature engineering for Double Color Ball prediction with:
-    - Multi-period trend analysis
+    - Multi-period trend analysis (default lookback=10)
     - Ball density distributions
     - Comprehensive pattern movement features
     - Advanced slanted pair analysis
@@ -319,7 +320,6 @@ def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[p
     
     Parameters:
         df: Input DataFrame with historical draw data
-        lookback_periods: Number of historical periods to consider for trend features
         
     Returns:
         pd.DataFrame: Enhanced DataFrame with sophisticated features
@@ -333,7 +333,7 @@ def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[p
     red_values = df_fe[red_cols].values
     blue_values = df_fe[blue_col].values
     
-    # Basic statistical features (optimized)
+    # Basic statistical features
     df_fe['red_sum'] = red_values.sum(axis=1)
     df_fe['red_span'] = red_values.max(axis=1) - red_values.min(axis=1)
     df_fe['red_odd_count'] = (red_values % 2 != 0).sum(axis=1)
@@ -350,58 +350,46 @@ def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[p
         df_fe[f'red_zone_{lower}_{upper}_count'] = ((red_values >= lower) & (red_values <= upper)).sum(axis=1)
     
     # Ball density estimation features
-    for i in range(1, 34):
-        df_fe[f'red_{i}_density'] = 0
-        if len(df_fe) > 5:  # Need enough data for KDE
-            kde = gaussian_kde(red_values.flatten())
+    if len(df_fe) > 5:  # Only calculate if enough data
+        kde = gaussian_kde(red_values.flatten())
+        for i in range(1, 34):
             df_fe[f'red_{i}_density'] = kde.evaluate(i)
     
-    # Multi-period trend features
-    for period in [3, 5, 10, 20]:
-        if len(df_fe) > period:
-            # Rolling statistics
-            df_fe[f'red_sum_ma_{period}'] = df_fe['red_sum'].rolling(period).mean().round(2)
-            df_fe[f'red_span_ma_{period}'] = df_fe['red_span'].rolling(period).mean().round(2)
-            df_fe[f'red_odd_ma_{period}'] = df_fe['red_odd_count'].rolling(period).mean().round(2)
-            
-            # Rolling probability of each red ball
-            for ball in range(1, 34):
-                df_fe[f'red_{ball}_prob_{period}'] = (
-                    (red_values == ball).sum(axis=1).rolling(period).sum() / (6 * period)
-                ).shift(1)
+    # Multi-period trend features (default lookback=10)
+    lookback_periods = 10
+    if len(df_fe) > lookback_periods:
+        for period in [3, 5, 10, 20]:
+            if len(df_fe) > period:
+                df_fe[f'red_sum_ma_{period}'] = df_fe['red_sum'].rolling(period).mean().round(2)
+                df_fe[f'red_span_ma_{period}'] = df_fe['red_span'].rolling(period).mean().round(2)
+                df_fe[f'red_odd_ma_{period}'] = df_fe['red_odd_count'].rolling(period).mean().round(2)
+                
+                for ball in range(1, 34):
+                    df_fe[f'red_{ball}_prob_{period}'] = (
+                        (red_values == ball).sum(axis=1).rolling(period).sum() / (6 * period)
+                    ).shift(1)
     
     # Advanced slanted pair analysis
     slanted_pairs = np.zeros(len(df_fe), dtype=int)
-    slanted_pair_details = [[] for _ in range(len(df_fe))]
-    
     for i in range(1, len(df_fe)):
         current = red_values[i]
         previous = red_values[i-1]
-        diff_matrix = np.abs(np.subtract.outer(current, previous))
-        slanted_pairs[i] = np.sum(diff_matrix == 1)
-        
-        # Record specific slanted pairs
-        pairs = []
-        for c in current:
-            for p in previous:
-                if abs(c - p) == 1:
-                    pairs.append(f"{min(c,p)}-{max(c,p)}")
-        slanted_pair_details[i] = '|'.join(pairs) if pairs else 'None'
-    
+        slanted_pairs[i] = np.sum(np.abs(np.subtract.outer(current, previous)) == 1)
     df_fe['red_slanted_pairs'] = slanted_pairs
-    df_fe['red_slanted_pair_details'] = slanted_pair_details
     
     # Consecutive number features
-    diffs = np.diff(np.sort(red_values, axis=1), axis=1)
+    sorted_red = np.sort(red_values, axis=1)
+    diffs = np.diff(sorted_red, axis=1)
     df_fe['red_consecutive_count'] = (diffs == 1).sum(axis=1)
     df_fe['red_max_consecutive'] = np.array([
-        max(len(list(g)) for k, g in groupby(row) if k == 1) + 1 
-        if 1 in row else 0 
+        max(len(list(g)) for k, g in groupby(row) if k == 1) + 1 if 1 in row else 0 
         for row in (diffs == 1)
     ])
     
     # Repeat number features with decay factor
     red_sets = [set(row) for row in red_values]
+    df_fe['red_repeat_count'] = 0
+    df_fe['red_repeat_decay'] = 0.0
     for i in range(1, len(df_fe)):
         repeat_counts = []
         decay_factors = []
@@ -409,42 +397,36 @@ def feature_engineer(df: pd.DataFrame, lookback_periods: int = 10) -> Optional[p
             common = len(red_sets[i].intersection(red_sets[i-j]))
             repeat_counts.append(common)
             decay_factors.append(common * (0.9 ** j))
-        df_fe.at[i, 'red_repeat_avg'] = np.mean(repeat_counts) if repeat_counts else 0
+        df_fe.at[i, 'red_repeat_count'] = np.mean(repeat_counts) if repeat_counts else 0
         df_fe.at[i, 'red_repeat_decay'] = np.sum(decay_factors) if decay_factors else 0
     
-    # Blue ball features with trend analysis
+    # Blue ball features
     df_fe['blue_is_odd'] = (blue_values % 2 != 0).astype(int)
     df_fe['blue_is_large'] = (blue_values > 8).astype(int)
     df_fe['blue_zone'] = pd.cut(blue_values, bins=[0, 4, 8, 12, 16], labels=False) + 1
     
-    for period in [5, 10, 20]:
-        if len(df_fe) > period:
-            df_fe[f'blue_ma_{period}'] = blue_values.rolling(period).mean().round(2)
-            df_fe[f'blue_odd_ratio_{period}'] = (
-                df_fe['blue_is_odd'].rolling(period).mean().round(2)
-            )
-    
     # AC value (Alternating Combination value)
-    df_fe['red_ac_value'] = df_fe.apply(
-        lambda row: calculate_ac_value(row[red_cols]), axis=1
+    df_fe['red_ac_value'] = df_fe[red_cols].apply(
+        lambda row: len(set(abs(x - y) for i, x in enumerate(sorted(row)) 
+                          for j, y in enumerate(sorted(row)) if j > i)) - 5,
+        axis=1
     )
     
     # Prime number features
     primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
     df_fe['red_prime_count'] = np.isin(red_values, primes).sum(axis=1)
     
-    # Tail number features (last digit)
+    # Tail number features
     for digit in range(10):
         df_fe[f'red_tail_{digit}_count'] = (red_values % 10 == digit).sum(axis=1)
     
-    # Number clustering features
-    df_fe['red_cluster_score'] = calculate_cluster_score(red_values)
-    
-    # Time interval features (days between draws)
-    if 'date' in df_fe.columns:
-        df_fe['date'] = pd.to_datetime(df_fe['date'])
-        df_fe['days_since_last'] = df_fe['date'].diff().dt.days
-        df_fe['draw_interval'] = df_fe['days_since_last'].fillna(0).astype(int)
+    # Cluster score feature
+    cluster_scores = []
+    for row in red_values:
+        sorted_row = np.sort(row)
+        gaps = np.diff(sorted_row)
+        cluster_scores.append(np.sum(1 / (gaps + 1)))
+    df_fe['red_cluster_score'] = cluster_scores
     
     return df_fe
 
