@@ -846,87 +846,44 @@ def run_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_config: Dict
 # ==============================================================================
 
 def objective(trial: optuna.trial.Trial, df_for_opt: pd.DataFrame, ml_lags: List[int], arm_rules: pd.DataFrame) -> float:
-    """加入剪枝机制的Optuna目标函数"""
+    """Optuna 的目标函数，用于评估一组给定的权重参数的好坏。"""
     trial_weights = {}
     
-    # 动态构建搜索空间（保持不变）
+    # 动态地从DEFAULT_WEIGHTS构建搜索空间
     for key, value in DEFAULT_WEIGHTS.items():
         if isinstance(value, int):
-            if 'NUM_COMBINATIONS' in key: 
-                trial_weights[key] = trial.suggest_int(key, 5, 15)
-            elif 'TOP_N' in key: 
-                trial_weights[key] = trial.suggest_int(key, 18, 28)
-            else: 
-                trial_weights[key] = trial.suggest_int(key, max(0, value - 2), value + 2)
+            if 'NUM_COMBINATIONS' in key: trial_weights[key] = trial.suggest_int(key, 5, 15)
+            elif 'TOP_N' in key: trial_weights[key] = trial.suggest_int(key, 18, 28)
+            else: trial_weights[key] = trial.suggest_int(key, max(0, value - 2), value + 2)
         elif isinstance(value, float):
+            # 对不同类型的浮点数使用不同的搜索范围
             if any(k in key for k in ['PERCENT', 'FACTOR', 'SUPPORT', 'CONFIDENCE']):
                 trial_weights[key] = trial.suggest_float(key, value * 0.5, value * 1.5)
-            else:
+            else: # 对权重参数使用更宽的搜索范围
                 trial_weights[key] = trial.suggest_float(key, value * 0.5, value * 2.0)
 
     full_trial_weights = DEFAULT_WEIGHTS.copy()
     full_trial_weights.update(trial_weights)
     
-    # 分阶段回测以实现早期剪枝
+    # 在快速回测中评估这组权重
     with SuppressOutput():
-        # 第一阶段：快速初步评估（使用较少数据）
-        _, initial_stats = run_backtest(
-            df_for_opt.tail(OPTIMIZATION_BACKTEST_PERIODS * 2),  # 使用较少数据
-            ml_lags, 
-            full_trial_weights, 
-            arm_rules, 
-            int(OPTIMIZATION_BACKTEST_PERIODS * 0.5)  # 较少期数
-        )
+        _, backtest_stats = run_backtest(df_for_opt, ml_lags, full_trial_weights, arm_rules, OPTIMIZATION_BACKTEST_PERIODS)
         
-        # 计算初步分数
-        prize_weights = {'一等奖': 1000, '二等奖': 200, '三等奖': 50, '四等奖': 10, '五等奖': 2, '六等奖': 1}
-        initial_score = sum(prize_weights.get(p, 0) * c for p, c in initial_stats.get('prize_counts', {}).items())
-        
-        # 向Optuna报告中间结果（用于剪枝决策）
-        trial.report(initial_score, step=1)
-        
-        # 检查是否应该剪枝
-        if trial.should_prune():
-            raise optuna.TrialPruned()
-        
-        # 第二阶段：完整评估（只有通过初步评估的试验才会执行）
-        _, full_stats = run_backtest(
-            df_for_opt,
-            ml_lags,
-            full_trial_weights,
-            arm_rules,
-            OPTIMIZATION_BACKTEST_PERIODS
-        )
-        
-        full_score = sum(prize_weights.get(p, 0) * c for p, c in full_stats.get('prize_counts', {}).items())
-        trial.report(full_score, step=2)
-        
-    return full_score
+    # 定义一个分数来衡量表现，高奖金等级的权重更高
+    prize_weights = {'一等奖': 1000, '二等奖': 200, '三等奖': 50, '四等奖': 10, '五等奖': 2, '六等奖': 1}
+    score = sum(prize_weights.get(p, 0) * c for p, c in backtest_stats.get('prize_counts', {}).items())
+    return score
 
 def optuna_progress_callback(study: optuna.study.Study, trial: optuna.trial.FrozenTrial, total_trials: int):
-    """改进后的进度回调，显示剪枝信息"""
+    """Optuna 的回调函数，用于在控制台报告优化进度。"""
     global OPTUNA_START_TIME
     current_iter = trial.number + 1
-    
-    if current_iter == 1:
-        OPTUNA_START_TIME = time.time()
-    
-    if current_iter % 10 == 0 or current_iter == total_trials:
+    if current_iter == 1 or current_iter % 10 == 0 or current_iter == total_trials:
         elapsed = time.time() - OPTUNA_START_TIME
         avg_time = elapsed / current_iter
         remaining_time = avg_time * (total_trials - current_iter)
-        
-        # 统计剪枝情况
-        pruned_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])
-        complete_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
-        
-        progress_logger.info(
-            f"Optuna进度: {current_iter}/{total_trials} | "
-            f"完成: {complete_trials} | "
-            f"剪枝: {pruned_trials} | "
-            f"最佳得分: {study.best_value:.2f} | "
-            f"剩余: {format_time(remaining_time)}"
-        )
+        best_value = f"{study.best_value:.2f}" if study.best_trial else "N/A"
+        progress_logger.info(f"Optuna进度: {current_iter}/{total_trials} | 当前最佳得分: {best_value} | 预估剩余: {format_time(remaining_time)}")
 
 
 # ==============================================================================
