@@ -90,7 +90,7 @@ ML_INTERACTION_SELF = ['red_span']
 # 计算号码“近期”出现频率时所参考的期数窗口大小
 RECENT_FREQ_WINDOW = 20  # Reduced window size for speed
 # 在分析模式下，进行策略回测时所评估的总期数
-BACKTEST_PERIODS_COUNT = 100  # Reduced backtest periods for speed
+BACKTEST_PERIODS_COUNT = 50  # Reduced backtest periods for speed
 # 在优化模式下，每次试验用于快速评估性能的回测期数 (数值越小优化越快)
 OPTIMIZATION_BACKTEST_PERIODS = 20  # Reduced backtest periods for optimization
 # 在优化模式下，Optuna 进行参数搜索的总试验次数
@@ -144,8 +144,8 @@ LGBM_PARAMS = {
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
     'learning_rate': 0.1,              # 学习率：控制每次迭代的步长 (increased slightly)
     'n_estimators': 150,                # 树的数量：总迭代次数 (reduced)
-    'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
-    'min_child_samples': 20,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
+    'num_leaves': 15,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
+    'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
     'feature_fraction': 0.8,            # 特征采样比例：每次迭代随机选择70%的特征
