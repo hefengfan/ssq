@@ -261,6 +261,164 @@ def parse_recommendations_from_report(content: str) -> Tuple[List, List, List]:
         
     log_message(f"解析结果: 单式{len(rec_tickets)}注, 复式红球{len(complex_reds)}个, 蓝球{len(complex_blues)}个", "INFO")
     return rec_tickets, complex_reds, complex_blues
+# ==============================================================================
+# --- 奖金计算与报告生成模块 ---
+# ==============================================================================
+
+def generate_complex_tickets(reds: List, blues: List) -> List: # <--- [FIX] 使用 List
+    """从复式号码中生成所有可能的单式投注组合。"""
+    if len(reds) < 6 or not blues: return []
+    max_tickets_limit = 20000  # 防止组合爆炸
+    
+    try:
+        # 使用数学公式预先计算组合数，避免生成超大列表
+        from math import comb
+        num_combs = comb(len(reds), 6) * len(blues)
+
+        if num_combs > max_tickets_limit:
+            log_message(f"复式号码将生成 {num_combs:,} 注，超过 {max_tickets_limit:,} 的限制，已跳过。", "WARNING")
+            return []
+            
+        tickets = [(sorted(list(r_combo)), b) for r_combo in combinations(reds, 6) for b in blues]
+        log_message(f"从复式号码中成功生成 {len(tickets):,} 注投注。")
+        return tickets
+    except ImportError: # Fallback for Python < 3.8
+        log_message("math.comb 不可用，正在使用自定义函数计算组合数。您的 Python 版本可能较低。", "WARNING")
+        def combinations_count(n, k):
+            if k < 0 or k > n: return 0
+            if k == 0 or k == n: return 1
+            if k > n // 2: k = n - k
+            res = 1
+            for i in range(k): res = res * (n - i) // (i + 1)
+            return res
+        num_combs = combinations_count(len(reds), 6) * len(blues)
+        if num_combs > max_tickets_limit:
+            log_message(f"复式号码将生成 {num_combs:,} 注，超过 {max_tickets_limit:,} 的限制，已跳过。", "WARNING")
+            return []
+        tickets = [(sorted(list(r_combo)), b) for r_combo in combinations(reds, 6) for b in blues]
+        log_message(f"从复式号码中成功生成 {len(tickets):,} 注投注。")
+        return tickets
+    except Exception as e:
+        log_message(f"生成复式投注时出错: {e}", "ERROR")
+        return []
+
+def calculate_prize(tickets: List, prize_red: List, prize_blue: int) -> Tuple[int, Dict, List]: # <--- [FIX] 使用 Tuple, Dict, List
+    """
+    计算给定投注列表的总奖金、奖级分布和中奖详情。
+
+    Args:
+        tickets (List): 投注列表, 格式为 [([r1..r6], b), ...]。
+        prize_red (List): 中奖红球列表。
+        prize_blue (int): 中奖蓝球。
+
+    Returns:
+        Tuple[int, Dict, List]: 总奖金, 奖级分布字典, 中奖号码详情列表。
+    """
+    prize_red_set = set(prize_red)
+    breakdown = {level: 0 for level in PRIZE_TABLE}
+    total_prize = 0
+    winning_tickets_details = []
+
+    for red, blue in tickets:
+        red_hits = len(set(red) & prize_red_set)
+        blue_hit = blue == prize_blue
+        
+        level = None
+        if blue_hit:
+            if red_hits == 6: level = 1
+            elif red_hits == 5: level = 3
+            elif red_hits == 4: level = 4
+            elif red_hits == 3: level = 5
+            elif red_hits <= 2: level = 6
+        else:
+            if red_hits == 6: level = 2
+            elif red_hits == 5: level = 4
+            elif red_hits == 4: level = 5
+
+        if level and level in PRIZE_TABLE:
+            prize_amount = PRIZE_TABLE[level]
+            total_prize += prize_amount
+            breakdown[level] += 1
+            winning_tickets_details.append({'red': red, 'blue': blue, 'level': level})
+            
+    return total_prize, breakdown, winning_tickets_details
+
+def format_winning_tickets_for_report(winning_list: List[Dict], prize_red: List, prize_blue: int) -> List[str]: # <--- [FIX]
+    """格式化中奖号码，高亮命中的数字，用于报告输出。"""
+    formatted_lines = []
+    prize_red_set = set(prize_red)
+    for ticket in winning_list:
+        red, blue, level = ticket['red'], ticket['blue'], ticket['level']
+        red_str = ' '.join(f"**{r:02d}**" if r in prize_red_set else f"{r:02d}" for r in red)
+        blue_str = f"**{blue:02d}**" if blue == prize_blue else f"{blue:02d}"
+        formatted_lines.append(f"  - 红球 [{red_str}] 蓝球 [{blue_str}]  -> {level}等奖")
+    return formatted_lines
+
+def manage_report(new_entry: Optional[Dict] = None, new_error: Optional[str] = None): # <--- [FIX]
+    """
+    维护主评估报告文件，自动追加新记录并清理旧记录。
+
+    Args:
+        new_entry (Optional[Dict]): 新的评估结果字典。
+        new_error (Optional[str]): 新的错误日志字符串。
+    """
+    normal_marker, error_marker = "==== 评估记录 ====", "==== 错误日志 ===="
+    content_str = robust_file_read(MAIN_REPORT_FILE) or ""
+    
+    # 分割文件内容为记录块和错误日志
+    parts = content_str.split(error_marker)
+    normal_part = parts[0]
+    error_part = parts[1] if len(parts) > 1 else ""
+    
+    # 解析现有记录
+    normal_entries = [entry.strip() for entry in normal_part.split('='*20) if entry.strip() and normal_marker not in entry]
+    error_entries = [err.strip() for err in error_part.splitlines() if err.strip()]
+
+    # 添加新记录
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if new_entry:
+        entry_lines = [
+            f"评估时间: {timestamp}",
+            f"评估期号 (实际开奖): {new_entry['eval_period']}",
+            f"分析报告数据截止期: {new_entry['report_cutoff_period']}",
+            f"开奖号码: 红球 {new_entry['prize_red']} 蓝球 {new_entry['prize_blue']}",
+            f"总奖金: {new_entry['total_prize']:,} 元",
+            "", "--- 单式推荐详情 ---"
+        ]
+        rec_prize, rec_bd, rec_winners = new_entry['rec_prize'], new_entry['rec_breakdown'], new_entry['rec_winners']
+        if rec_prize > 0:
+            entry_lines.append(f"奖金: {rec_prize:,}元 | 明细: " + ", ".join(f"{k}等奖x{v}" for k,v in rec_bd.items() if v>0))
+            entry_lines.extend(format_winning_tickets_for_report(rec_winners, new_entry['prize_red'], new_entry['prize_blue']))
+        else: entry_lines.append("未中奖")
+        
+        entry_lines.extend(["", "--- 复式推荐详情 ---"])
+        com_prize, com_bd, com_winners = new_entry['com_prize'], new_entry['com_breakdown'], new_entry['com_winners']
+        if com_prize > 0:
+            entry_lines.append(f"奖金: {com_prize:,}元 | 明细: " + ", ".join(f"{k}等奖x{v}" for k,v in com_bd.items() if v>0))
+            entry_lines.extend(format_winning_tickets_for_report(com_winners, new_entry['prize_red'], new_entry['prize_blue']))
+        else: entry_lines.append("未中奖或未生成投注")
+        
+        normal_entries.insert(0, "\n".join(entry_lines))
+
+    if new_error:
+        error_entries.insert(0, f"[{timestamp}] {new_error}")
+
+    # 清理旧记录
+    final_normal_entries = normal_entries[:MAX_NORMAL_RECORDS]
+    final_error_entries = error_entries[:MAX_ERROR_LOGS]
+
+    # 写回文件
+    try:
+        with open(MAIN_REPORT_FILE, 'w', encoding='utf-8') as f:
+            f.write(f"{normal_marker}\n")
+            if final_normal_entries:
+                f.write(("\n" + "="*20 + "\n").join(final_normal_entries))
+            f.write(f"\n\n{error_marker}\n")
+            if final_error_entries:
+                f.write("\n".join(final_error_entries))
+        log_message(f"主报告已更新: {MAIN_REPORT_FILE}", "INFO")
+    except IOError as e:
+        log_message(f"写入主报告文件失败: {e}", "ERROR")
 
 # ==============================================================================
 # --- 主流程改进 ---
@@ -361,4 +519,13 @@ def main_process():
         log_message("====== 主流程结束 ======", "INFO")
 
 if __name__ == "__main__":
-    main_process()
+    try:
+        main_process()
+    except Exception as e:
+        tb_str = traceback.format_exc()
+        error_message = f"主流程发生未捕获的严重异常: {type(e).__name__} - {e}\n{tb_str}"
+        log_message(error_message, "CRITICAL")
+        try:
+            manage_report(new_error=error_message)
+        except Exception as report_e:
+            log_message(f"在记录严重错误时再次发生错误: {report_e}", "CRITICAL")
