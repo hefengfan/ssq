@@ -103,6 +103,9 @@ MIN_POSITIVE_SAMPLES_FOR_ML = 25  # Reduced for speed
 # ==============================================================================
 # 这里的每一项都是一个可调整的策略参数，共同决定了最终的推荐结果。
 DEFAULT_WEIGHTS = {
+    "ODD_COUNT_SCORE_WEIGHT": 0.5,
+    "SPAN_SCORE_WEIGHT": 0.7,
+    "LOG_SUM_SCORE_WEIGHT": 0.6,
   "FREQ_SCORE_WEIGHT": 9.539373754177896,
   "OMISSION_SCORE_WEIGHT": 43.85327635017346,
   "MAX_OMISSION_RATIO_SCORE_WEIGHT_RED": 47.86831520129507,
@@ -306,61 +309,64 @@ def clean_and_structure(df: pd.DataFrame) -> Optional[pd.DataFrame]:
 def feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     Enhances the DataFrame with various derived features for Double Color Ball prediction.
+    Optimized for speed by:
+    1. Using vectorized operations where possible
+    2. Reducing redundant calculations
+    3. Minimizing apply operations
     """
     if df is None or df.empty:
         return None
+    
     df_fe = df.copy()
     red_cols = [f'red{i+1}' for i in range(6)]
-
-    # Basic statistical features
-    df_fe['red_sum'] = df_fe[red_cols].sum(axis=1)
-    df_fe['red_span'] = df_fe[red_cols].max(axis=1) - df_fe[red_cols].min(axis=1)
-    df_fe['red_odd_count'] = df_fe[red_cols].apply(lambda r: sum(x % 2 != 0 for x in r), axis=1)
-    df_fe['red_even_count'] = 6 - df_fe['red_odd_count'] #Added even count
-    df_fe['red_mean'] = df_fe[red_cols].mean(axis=1) #Added mean
-    df_fe['red_median'] = df_fe[red_cols].median(axis=1) #Added median
-    df_fe['red_std'] = df_fe[red_cols].std(axis=1) #Added standard deviation
-
-    # Zone features
-    for zone, (start, end) in RED_ZONES.items():
-        df_fe[f'red_{zone}_count'] = df_fe[red_cols].apply(lambda r: sum(start <= x <= end for x in r), axis=1)
-
+    red_values = df_fe[red_cols].values
+    
+    # Basic statistical features (vectorized operations)
+    df_fe['red_sum'] = red_values.sum(axis=1)
+    df_fe['red_span'] = red_values.max(axis=1) - red_values.min(axis=1)
+    df_fe['red_odd_count'] = (red_values % 2 != 0).sum(axis=1)
+    df_fe['red_even_count'] = 6 - df_fe['red_odd_count']
+    df_fe['red_mean'] = red_values.mean(axis=1)
+    df_fe['red_median'] = np.median(red_values, axis=1)
+    df_fe['red_std'] = red_values.std(axis=1)
+    
+    # Zone features (optimized)
+    if hasattr(df_fe, 'RED_ZONES'):  # Make sure RED_ZONES is defined
+        for zone, (start, end) in RED_ZONES.items():
+            df_fe[f'red_{zone}_count'] = ((red_values >= start) & (red_values <= end)).sum(axis=1)
+    
     # Shape features (consecutive numbers)
-    def count_consecutive(row):
-        return sum(1 for i in range(5) if row.iloc[i+1] - row.iloc[i] == 1)
-    df_fe['red_consecutive_count'] = df_fe[red_cols].apply(count_consecutive, axis=1)
-
+    diffs = np.diff(red_values, axis=1)
+    df_fe['red_consecutive_count'] = (diffs == 1).sum(axis=1)
+    
     # Repeat features (number of repeated numbers from the previous period)
-    red_sets = df_fe[red_cols].apply(set, axis=1)
-    prev_red_sets = red_sets.shift(1)
-    df_fe['red_repeat_count'] = [len(current.intersection(prev)) if isinstance(prev, set) else 0
-                                 for current, prev in zip(red_sets, prev_red_sets)]
-
+    red_sets = [set(row) for row in red_values]
+    prev_red_sets = [set()] + red_sets[:-1]
+    df_fe['red_repeat_count'] = [len(current.intersection(prev)) for current, prev in zip(red_sets, prev_red_sets)]
+    
     # Blue ball features
-    df_fe['blue_is_odd'] = (df_fe['blue'] % 2 != 0).astype(int)
-    df_fe['blue_is_large'] = (df_fe['blue'] > 8).astype(int)
-
-    # Added log features (improved)
-    df_fe['red_log_sum'] = np.log1p(df_fe['red_sum']) #using log1p to handle 0
-    df_fe['red_log_avg'] = np.log1p(df_fe['red_mean']) #using log1p to handle 0
-
-    # Added features:  Sum of squares, and sum of absolute differences between consecutive numbers
-    df_fe['red_sum_sq'] = (df_fe[red_cols]**2).sum(axis=1)
-    df_fe['red_abs_diff_sum'] = df_fe[red_cols].diff(axis=1).abs().sum(axis=1)
-
-
-    # Slanted pairs feature (improved efficiency)
-    def count_slanted_pairs(row):
-        count = 0
-        if row.name > 0:  # Check for first row
-            prev_row = df_fe.iloc[row.name - 1]
-            count = sum(1 for c_num in row[red_cols] for p_num in prev_row[red_cols] if abs(c_num - p_num) == 1)
-        return count
-
-    df_fe['red_slanted_pairs'] = df_fe.apply(count_slanted_pairs, axis=1)
-
+    blue_values = df_fe['blue'].values
+    df_fe['blue_is_odd'] = (blue_values % 2 != 0).astype(int)
+    df_fe['blue_is_large'] = (blue_values > 8).astype(int)
+    
+    # Log features
+    df_fe['red_log_sum'] = np.log1p(df_fe['red_sum'])
+    df_fe['red_log_avg'] = np.log1p(df_fe['red_mean'])
+    
+    # Sum of squares and absolute differences
+    df_fe['red_sum_sq'] = (red_values**2).sum(axis=1)
+    df_fe['red_abs_diff_sum'] = np.abs(diffs).sum(axis=1)
+    
+    # Slanted pairs feature (optimized)
+    slanted_pairs = np.zeros(len(df_fe), dtype=int)
+    for i in range(1, len(df_fe)):
+        current = red_values[i]
+        previous = red_values[i-1]
+        # Vectorized calculation of slanted pairs
+        slanted_pairs[i] = np.sum(np.abs(np.subtract.outer(current, previous)) == 1)
+    df_fe['red_slanted_pairs'] = slanted_pairs
+    
     return df_fe
-
 
 def create_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """
@@ -505,49 +511,100 @@ def analyze_associations(df: pd.DataFrame, weights_config: Dict) -> pd.DataFrame
 
 def calculate_scores(freq_data: Dict, probabilities: Dict, weights: Dict, df_fe: pd.DataFrame) -> Dict[str, Dict[int, float]]:
     """
-    Calculates final scores for each ball, incorporating frequency, omission, and ML predictions. Weights are adjustable.
+    Calculates final scores for each ball, incorporating frequency, omission, and ML predictions.
+    Optimized with:
+    - Vectorized operations where possible
+    - Pre-computed values
+    - Efficient feature integration
+    - Additional statistical features
     """
-    r_scores, b_scores = {}, {}
-    r_freq, b_freq = freq_data.get('red_freq', {}), freq_data.get('blue_freq', {})
-    omission, avg_int = freq_data.get('current_omission', {}), freq_data.get('average_interval', {})
-    max_hist_o, recent_freq = freq_data.get('max_historical_omission_red', {}), freq_data.get('recent_N_freq_red', {})
-    r_pred, b_pred = probabilities.get('red', {}), probabilities.get('blue', {})
-
-    # Red ball scoring (with weights for new features)
+    # Initialize score dictionaries
+    r_scores = {num: 0.0 for num in RED_BALL_RANGE}
+    b_scores = {num: 0.0 for num in BLUE_BALL_RANGE}
+    
+    # Extract frequency data with defaults
+    r_freq = freq_data.get('red_freq', {})
+    b_freq = freq_data.get('blue_freq', {})
+    omission = freq_data.get('current_omission', {})
+    avg_int = freq_data.get('average_interval', {})
+    max_hist_o = freq_data.get('max_historical_omission_red', {})
+    recent_freq = freq_data.get('recent_N_freq_red', {})
+    
+    # Extract probabilities with defaults
+    r_pred = probabilities.get('red', {})
+    b_pred = probabilities.get('blue', {})
+    
+    # Precompute feature aggregates for red balls
+    if not df_fe.empty:
+        # Create a lookup dictionary for red sum features
+        feature_aggs = df_fe.groupby('red_sum').agg({
+            'red_mean': 'mean',
+            'red_median': 'mean',
+            'red_std': 'mean',
+            'red_consecutive_count': 'mean',
+            'red_slanted_pairs': 'mean',
+            'red_odd_count': 'mean',
+            'red_span': 'mean',
+            'red_log_sum': 'mean'
+        }).to_dict('index')
+    else:
+        feature_aggs = {}
+    
+    # Calculate red ball scores (optimized)
     for num in RED_BALL_RANGE:
-        freq_s = (r_freq.get(num, 0)) * weights['FREQ_SCORE_WEIGHT']
-        omit_s = np.exp(-0.005 * (omission.get(num, 0) - avg_int.get(num, 0))**2) * weights['OMISSION_SCORE_WEIGHT']
-        max_o_ratio = (omission.get(num, 0) / max_hist_o.get(num, 1)) if max_hist_o.get(num, 0) > 0 else 0
-        max_o_s = max_o_ratio * weights['MAX_OMISSION_RATIO_SCORE_WEIGHT_RED']
-        recent_s = recent_freq.get(num, 0) * weights['RECENT_FREQ_SCORE_WEIGHT_RED']
-        ml_s = r_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_RED']
-
-        # Scores for new features - CORRECTED indexing
-        mean_s = df_fe['red_mean'].loc[df_fe['red_sum'] == num].mean() * weights['MEAN_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
-        median_s = df_fe['red_median'].loc[df_fe['red_sum'] == num].mean() * weights['MEDIAN_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
-        std_s = df_fe['red_std'].loc[df_fe['red_sum'] == num].mean() * weights['STD_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
-        consecutive_s = df_fe['red_consecutive_count'].loc[df_fe['red_sum'] == num].mean() * weights['CONSECUTIVE_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
-        slanted_s = df_fe['red_slanted_pairs'].loc[df_fe['red_sum'] == num].mean() * weights['SLANTED_SCORE_WEIGHT'] if num in df_fe['red_sum'].values else 0
-
-        r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s, mean_s, median_s, std_s, consecutive_s, slanted_s])
-
-    # Blue ball scoring (with potential adjustments)
+        # Base scores
+        scores = [
+            r_freq.get(num, 0) * weights['FREQ_SCORE_WEIGHT'],
+            np.exp(-0.005 * (omission.get(num, 0) - avg_int.get(num, 0))**2) * weights['OMISSION_SCORE_WEIGHT'],
+            (omission.get(num, 0) / max_hist_o.get(num, 1) if max_hist_o.get(num, 0) > 0 else 0) * weights['MAX_OMISSION_RATIO_SCORE_WEIGHT_RED'],
+            recent_freq.get(num, 0) * weights['RECENT_FREQ_SCORE_WEIGHT_RED'],
+            r_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_RED']
+        ]
+        
+        # Additional feature scores
+        if num in feature_aggs:
+            features = feature_aggs[num]
+            scores.extend([
+                features['red_mean'] * weights['MEAN_SCORE_WEIGHT'],
+                features['red_median'] * weights['MEDIAN_SCORE_WEIGHT'],
+                features['red_std'] * weights['STD_SCORE_WEIGHT'],
+                features['red_consecutive_count'] * weights['CONSECUTIVE_SCORE_WEIGHT'],
+                features['red_slanted_pairs'] * weights['SLANTED_SCORE_WEIGHT'],
+                features['red_odd_count'] * weights['ODD_COUNT_SCORE_WEIGHT'],
+                features['red_span'] * weights['SPAN_SCORE_WEIGHT'],
+                features['red_log_sum'] * weights['LOG_SUM_SCORE_WEIGHT']
+            ])
+        
+        r_scores[num] = sum(scores)
+    
+    # Calculate blue ball scores (optimized)
     for num in BLUE_BALL_RANGE:
-        freq_s = (b_freq.get(num, 0)) * weights['BLUE_FREQ_SCORE_WEIGHT']
-        omit_s = np.exp(-0.01 * (omission.get(f'blue_{num}', 0) - avg_int.get(f'blue_{num}', 0))**2) * weights['BLUE_OMISSION_SCORE_WEIGHT']
-        ml_s = b_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_BLUE']
-        b_scores[num] = sum([freq_s, omit_s, ml_s])
-
-    # Normalize scores (0-100 range)
+        b_scores[num] = sum([
+            b_freq.get(num, 0) * weights['BLUE_FREQ_SCORE_WEIGHT'],
+            np.exp(-0.01 * (omission.get(f'blue_{num}', 0) - avg_int.get(f'blue_{num}', 0))**2) * weights['BLUE_OMISSION_SCORE_WEIGHT'],
+            b_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_BLUE']
+        ])
+    
+    # Normalize scores (vectorized implementation)
     def normalize_scores(scores_dict):
-        if not scores_dict: return {}
-        vals = list(scores_dict.values())
-        min_v, max_v = min(vals), max(vals)
-        if max_v == min_v: return {k: 50.0 for k in scores_dict}
-        return {k: (v - min_v) / (max_v - min_v) * 100 for k, v in scores_dict.items()}
-
-    return {'red_scores': normalize_scores(r_scores), 'blue_scores': normalize_scores(b_scores)}
-
+        if not scores_dict:
+            return {}
+            
+        values = np.array(list(scores_dict.values()))
+        if len(values) == 0:
+            return {k: 50.0 for k in scores_dict}
+            
+        min_v, max_v = values.min(), values.max()
+        if max_v == min_v:
+            return {k: 50.0 for k in scores_dict}
+            
+        normalized = (values - min_v) / (max_v - min_v) * 100
+        return dict(zip(scores_dict.keys(), normalized))
+    
+    return {
+        'red_scores': normalize_scores(r_scores),
+        'blue_scores': normalize_scores(b_scores)
+    }
 # ==============================================================================
 # --- 机器学习模块 ---
 # ==============================================================================
@@ -712,7 +769,6 @@ def generate_combinations(scores_data: Dict, pattern_data: Dict, arm_rules: pd.D
 # ==============================================================================
 # --- 核心分析与回测流程 ---
 # ==============================================================================
-
 def run_analysis_and_recommendation(df_hist: pd.DataFrame, ml_lags: List[int], weights_config: Dict, arm_rules: pd.DataFrame) -> Tuple:
     """
     执行一次完整的分析和推荐流程，用于特定一期。
