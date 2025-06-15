@@ -58,7 +58,7 @@ PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu_processed.csv')
 # 运行模式配置:
 # True  -> 运行参数优化，耗时较长，但可能找到更优策略。
 # False -> 使用默认权重进行快速分析和推荐。
-ENABLE_OPTUNA_OPTIMIZATION = False
+ENABLE_OPTUNA_OPTIMIZATION = True
 
 # --------------------------
 # --- 策略开关配置 ---
@@ -142,7 +142,7 @@ LGBM_PARAMS = {
     'boosting_type': 'gbdt',            # 提升类型：梯度提升决策树
     'learning_rate': 0.3,              # 学习率：控制每次迭代的步长 (increased slightly)
     'n_estimators': 100,                # 树的数量：总迭代次数 (reduced)
-    'num_leaves': 15,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
+    'num_leaves': 30,                   # 每棵树的最大叶子节点数：控制模型复杂度 (reduced)
     'min_child_samples': 15,            # 一个叶子节点上所需的最小样本数：防止过拟合 (reduced)
     'lambda_l1': 0.15,                  # L1 正则化
     'lambda_l2': 0.15,                  # L2 正则化
