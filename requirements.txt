@@ -6,3 +6,4 @@ optuna
 lightgbm
 mlxtend
 lxml
+scipy
