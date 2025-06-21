@@ -3,18 +3,21 @@
 增强版双色球彩票数据分析与推荐系统
 ================================
 
-在原有系统基础上增加：
-1. 多模型集成（随机森林、梯度提升、神经网络）
+基于原有系统增强，不添加新库，不修改文件结构
+增加功能：
+1. 多模型集成方法
 2. 特征重要性分析
-3. 高级超参数优化
-4. 神经网络走势分析
-5. 斜连组和密度分析
-6. 号码形状和聚散分析
-7. 自动学习纠正机制
+3. 超参数优化增强
+4. 神经网络分析（基于现有库）
+5. 斜连组分析
+6. 密度和对数分析
+7. 号码形状分析
+8. 自动学习纠正机制
 
-版本: 6.0 (Enhanced & Neural Network Integrated)
+版本: 5.2 (Enhanced without new dependencies)
 """
 
+# --- 标准库导入 ---
 import os
 import sys
 import json
@@ -28,37 +31,32 @@ from collections import Counter, defaultdict
 from contextlib import redirect_stdout
 from typing import Union, Optional, List, Dict, Tuple, Any
 from functools import partial
-import itertools
 
-# 第三方库导入
+# --- 第三方库导入（基于原有代码）---
 import numpy as np
 import pandas as pd
 import optuna
 from lightgbm import LGBMClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score
-from sklearn.preprocessing import StandardScaler
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
 import concurrent.futures
 
 # ==============================================================================
-# --- 全局常量与配置 ---
+# --- 全局常量与配置（增强版）---
 # ==============================================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE_PATH = os.path.join(SCRIPT_DIR, '../shuangseqiu.csv')
-PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, '../shuangseqiu_processed.csv')
+CSV_FILE_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu.csv')
+PROCESSED_CSV_PATH = os.path.join(SCRIPT_DIR, 'shuangseqiu_processed.csv')
 
 # 增强功能开关
-ENABLE_NEURAL_NETWORK = True
-ENABLE_ENSEMBLE_MODELS = True
+ENABLE_MULTI_MODEL_ENSEMBLE = True
 ENABLE_FEATURE_IMPORTANCE = True
 ENABLE_ADVANCED_PATTERNS = True
 ENABLE_DIAGONAL_ANALYSIS = True
 ENABLE_DENSITY_ANALYSIS = True
 ENABLE_AUTO_CORRECTION = True
+ENABLE_NEURAL_SIMULATION = True  # 使用数学函数模拟神经网络
 
 # 运行模式配置
 ENABLE_OPTUNA_OPTIMIZATION = True
@@ -70,106 +68,97 @@ RED_BALL_RANGE = range(1, 34)
 BLUE_BALL_RANGE = range(1, 17)
 RED_ZONES = {'Zone1': (1, 11), 'Zone2': (12, 22), 'Zone3': (23, 33)}
 
-# 分析参数配置
-ML_LAG_FEATURES = [1, 3, 5, 10, 15]  # 增加更多滞后特征
-ML_INTERACTION_PAIRS = [('red_sum', 'red_odd_count'), ('red_span', 'red_consecutive_count')]
-ML_INTERACTION_SELF = ['red_span', 'red_sum']
-RECENT_FREQ_WINDOW = 20
-BACKTEST_PERIODS_COUNT = 100
-OPTIMIZATION_BACKTEST_PERIODS = 20
-OPTIMIZATION_TRIALS = 150  # 增加优化试验次数
-MIN_POSITIVE_SAMPLES_FOR_ML = 20
+# 增强分析参数配置
+ML_LAG_FEATURES = [1, 3, 5, 10, 15, 20]  # 增加更多滞后特征
+ML_INTERACTION_PAIRS = [
+    ('red_sum', 'red_odd_count'), 
+    ('red_span', 'red_consecutive_count'),
+    ('red_mean', 'red_std'),
+    ('red_density', 'red_clustering')
+]
+ML_INTERACTION_SELF = ['red_span', 'red_sum', 'red_density']
+RECENT_FREQ_WINDOW = 25
+BACKTEST_PERIODS_COUNT = 120
+OPTIMIZATION_BACKTEST_PERIODS = 25
+OPTIMIZATION_TRIALS = 200  # 增加优化试验次数
+MIN_POSITIVE_SAMPLES_FOR_ML = 18
 
-# 神经网络配置
-NEURAL_NETWORK_PARAMS = {
-    'hidden_layer_sizes': (100, 50, 25),
-    'activation': 'relu',
-    'solver': 'adam',
-    'alpha': 0.001,
-    'learning_rate': 'adaptive',
-    'max_iter': 500,
-    'random_state': 42
-}
+# 多模型集成配置
+ENSEMBLE_MODELS_COUNT = 3  # 集成模型数量
+NEURAL_SIMULATION_LAYERS = [50, 30, 15]  # 模拟神经网络层数
 
-# 集成模型配置
-ENSEMBLE_MODELS_CONFIG = {
-    'random_forest': {
-        'n_estimators': 100,
-        'max_depth': 10,
-        'min_samples_split': 5,
-        'random_state': 42
-    },
-    'gradient_boosting': {
-        'n_estimators': 100,
-        'learning_rate': 0.1,
-        'max_depth': 6,
-        'random_state': 42
-    }
-}
-
-# 默认权重配置（增强版）
+# 增强默认权重配置
 DEFAULT_WEIGHTS = {
     # 反向思维
-    'FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT': 0.25,
+    'FINAL_COMBO_REVERSE_REMOVE_TOP_PERCENT': 0.22,
     
     # 组合生成
-    'NUM_COMBINATIONS_TO_GENERATE': 12,
-    'TOP_N_RED_FOR_CANDIDATE': 28,
-    'TOP_N_BLUE_FOR_CANDIDATE': 8,
+    'NUM_COMBINATIONS_TO_GENERATE': 15,
+    'TOP_N_RED_FOR_CANDIDATE': 30,
+    'TOP_N_BLUE_FOR_CANDIDATE': 10,
     
-    # 红球评分权重
-    'FREQ_SCORE_WEIGHT': 25.0,
-    'OMISSION_SCORE_WEIGHT': 20.0,
-    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 15.0,
-    'RECENT_FREQ_SCORE_WEIGHT_RED': 15.0,
-    'ML_PROB_SCORE_WEIGHT_RED': 20.0,
+    # 红球评分权重（增强版）
+    'FREQ_SCORE_WEIGHT': 22.5,
+    'OMISSION_SCORE_WEIGHT': 18.5,
+    'MAX_OMISSION_RATIO_SCORE_WEIGHT_RED': 16.8,
+    'RECENT_FREQ_SCORE_WEIGHT_RED': 14.2,
+    'ML_PROB_SCORE_WEIGHT_RED': 20.5,
     
-    # 新增：神经网络权重
-    'NEURAL_PROB_SCORE_WEIGHT_RED': 18.0,
-    'ENSEMBLE_PROB_SCORE_WEIGHT_RED': 22.0,
+    # 新增：多模型权重
+    'ENSEMBLE_PROB_SCORE_WEIGHT_RED': 25.0,
+    'NEURAL_SIM_SCORE_WEIGHT_RED': 18.5,
+    'DENSITY_SCORE_WEIGHT_RED': 12.0,
+    'DIAGONAL_SCORE_WEIGHT_RED': 10.5,
     
-    # 蓝球评分权重
-    'BLUE_FREQ_SCORE_WEIGHT': 25.0,
-    'BLUE_OMISSION_SCORE_WEIGHT': 20.0,
-    'ML_PROB_SCORE_WEIGHT_BLUE': 40.0,
-    'NEURAL_PROB_SCORE_WEIGHT_BLUE': 35.0,
+    # 蓝球评分权重（增强版）
+    'BLUE_FREQ_SCORE_WEIGHT': 24.0,
+    'BLUE_OMISSION_SCORE_WEIGHT': 21.5,
+    'ML_PROB_SCORE_WEIGHT_BLUE': 38.0,
+    'ENSEMBLE_PROB_SCORE_WEIGHT_BLUE': 32.0,
+    'NEURAL_SIM_SCORE_WEIGHT_BLUE': 28.5,
     
-    # 组合属性匹配奖励
-    'COMBINATION_ODD_COUNT_MATCH_BONUS': 12.0,
-    'COMBINATION_BLUE_ODD_MATCH_BONUS': 8.0,
-    'COMBINATION_ZONE_MATCH_BONUS': 15.0,
-    'COMBINATION_BLUE_SIZE_MATCH_BONUS': 10.0,
+    # 组合属性匹配奖励（增强版）
+    'COMBINATION_ODD_COUNT_MATCH_BONUS': 15.5,
+    'COMBINATION_BLUE_ODD_MATCH_BONUS': 9.2,
+    'COMBINATION_ZONE_MATCH_BONUS': 18.0,
+    'COMBINATION_BLUE_SIZE_MATCH_BONUS': 11.5,
     
     # 新增：高级模式匹配奖励
-    'DIAGONAL_PATTERN_BONUS': 10.0,
-    'DENSITY_PATTERN_BONUS': 12.0,
-    'SHAPE_PATTERN_BONUS': 8.0,
+    'DIAGONAL_PATTERN_BONUS': 12.8,
+    'DENSITY_PATTERN_BONUS': 14.2,
+    'SHAPE_PATTERN_BONUS': 10.8,
+    'CLUSTERING_PATTERN_BONUS': 13.5,
+    'LOGARITHMIC_PATTERN_BONUS': 8.5,
     
-    # 关联规则参数
-    'ARM_MIN_SUPPORT': 0.015,
-    'ARM_MIN_CONFIDENCE': 0.5,
-    'ARM_MIN_LIFT': 1.4,
-    'ARM_COMBINATION_BONUS_WEIGHT': 20.0,
-    'ARM_BONUS_LIFT_FACTOR': 0.5,
-    'ARM_BONUS_CONF_FACTOR': 0.3,
+    # 关联规则参数（优化版）
+    'ARM_MIN_SUPPORT': 0.018,
+    'ARM_MIN_CONFIDENCE': 0.48,
+    'ARM_MIN_LIFT': 1.35,
+    'ARM_COMBINATION_BONUS_WEIGHT': 22.5,
+    'ARM_BONUS_LIFT_FACTOR': 0.55,
+    'ARM_BONUS_CONF_FACTOR': 0.35,
     
     # 组合多样性控制
     'DIVERSITY_MIN_DIFFERENT_REDS': 3,
+    
+    # 新增：自动纠错参数
+    'AUTO_CORRECTION_SENSITIVITY': 0.15,
+    'CORRECTION_MEMORY_PERIODS': 15,
 }
 
-# LightGBM参数
+# LightGBM参数（优化版）
 LGBM_PARAMS = {
     'objective': 'binary',
     'boosting_type': 'gbdt',
-    'learning_rate': 0.05,
-    'n_estimators': 120,
-    'num_leaves': 20,
-    'min_child_samples': 12,
-    'lambda_l1': 0.1,
-    'lambda_l2': 0.1,
-    'feature_fraction': 0.8,
-    'bagging_fraction': 0.85,
-    'bagging_freq': 5,
+    'learning_rate': 0.045,
+    'n_estimators': 150,
+    'num_leaves': 25,
+    'min_child_samples': 10,
+    'lambda_l1': 0.12,
+    'lambda_l2': 0.12,
+    'feature_fraction': 0.85,
+    'bagging_fraction': 0.88,
+    'bagging_freq': 4,
     'seed': 42,
     'n_jobs': 1,
     'verbose': -1,
@@ -257,7 +246,51 @@ def format_time(seconds: float) -> str:
     return f"{int(hours):02d}:{int(minutes):02d}:{int(sec):02d}"
 
 # ==============================================================================
-# --- 数据处理模块 ---
+# --- 增强数学工具函数 ---
+# ==============================================================================
+
+def sigmoid(x):
+    """Sigmoid激活函数"""
+    return 1 / (1 + math.exp(-np.clip(x, -500, 500)))
+
+def tanh_activation(x):
+    """Tanh激活函数"""
+    return math.tanh(x)
+
+def relu_activation(x):
+    """ReLU激活函数"""
+    return max(0, x)
+
+def softmax(x_list):
+    """Softmax函数"""
+    exp_x = [math.exp(x - max(x_list)) for x in x_list]
+    sum_exp = sum(exp_x)
+    return [exp_val / sum_exp for exp_val in exp_x]
+
+def calculate_entropy(probabilities):
+    """计算信息熵"""
+    entropy = 0
+    for p in probabilities:
+        if p > 0:
+            entropy -= p * math.log2(p)
+    return entropy
+
+def is_prime(n: int) -> bool:
+    """判断一个数是否为质数。"""
+    if n < 2:
+        return False
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+    
+    for i in range(3, int(n**0.5) + 1, 2):
+        if n % i == 0:
+            return False
+    return True
+
+# ==============================================================================
+# --- 数据处理模块（增强版）---
 # ==============================================================================
 
 def load_data(file_path: str) -> Optional[pd.DataFrame]:
@@ -340,6 +373,7 @@ def enhanced_feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     df_fe['red_odd_count'] = df_fe[red_cols].apply(lambda r: sum(x % 2 != 0 for x in r), axis=1)
     df_fe['red_mean'] = df_fe[red_cols].mean(axis=1)
     df_fe['red_std'] = df_fe[red_cols].std(axis=1)
+    df_fe['red_median'] = df_fe[red_cols].median(axis=1)
     
     # 区间特征
     for zone, (start, end) in RED_ZONES.items():
@@ -361,56 +395,118 @@ def enhanced_feature_engineer(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         for current, prev in zip(red_sets, prev_red_sets)
     ]
     
-    # 新增：高级特征
-    if ENABLE_ADVANCED_PATTERNS:
-        # 密度特征
-        df_fe['red_density'] = df_fe.apply(lambda row: calculate_density(
+    # 增强特征：密度分析
+    if ENABLE_DENSITY_ANALYSIS:
+        df_fe['red_density'] = df_fe.apply(lambda row: calculate_density_score(
             [row[f'red{i+1}'] for i in range(6)]
         ), axis=1)
         
-        # 斜连特征
+        df_fe['red_density_variance'] = df_fe.apply(lambda row: calculate_density_variance(
+            [row[f'red{i+1}'] for i in range(6)]
+        ), axis=1)
+    
+    # 增强特征：斜连分析
+    if ENABLE_DIAGONAL_ANALYSIS:
         df_fe['red_diagonal_count'] = df_fe.apply(lambda row: calculate_diagonal_patterns(
             [row[f'red{i+1}'] for i in range(6)]
         ), axis=1)
         
-        # 形状特征（聚散度）
-        df_fe['red_clustering'] = df_fe.apply(lambda row: calculate_clustering_score(
+        df_fe['red_diagonal_strength'] = df_fe.apply(lambda row: calculate_diagonal_strength(
             [row[f'red{i+1}'] for i in range(6)]
         ), axis=1)
     
-    # 蓝球特征
+    # 增强特征：聚散分析
+    if ENABLE_ADVANCED_PATTERNS:
+        df_fe['red_clustering'] = df_fe.apply(lambda row: calculate_clustering_score(
+            [row[f'red{i+1}'] for i in range(6)]
+        ), axis=1)
+        
+        df_fe['red_dispersion'] = df_fe.apply(lambda row: calculate_dispersion_score(
+            [row[f'red{i+1}'] for i in range(6)]
+        ), axis=1)
+        
+        # 对数特征
+        df_fe['red_log_sum'] = np.log1p(df_fe['red_sum'])
+        df_fe['red_log_span'] = np.log1p(df_fe['red_span'])
+    
+    # 质数特征
+    df_fe['red_prime_count'] = df_fe[red_cols].apply(
+        lambda r: sum(is_prime(x) for x in r), axis=1
+    )
+    
+    # 蓝球增强特征
     df_fe['blue_is_odd'] = (df_fe['blue'] % 2 != 0).astype(int)
     df_fe['blue_is_large'] = (df_fe['blue'] > 8).astype(int)
     df_fe['blue_is_prime'] = df_fe['blue'].apply(is_prime).astype(int)
+    df_fe['blue_mod_3'] = df_fe['blue'] % 3
+    df_fe['blue_mod_4'] = df_fe['blue'] % 4
     
     return df_fe
 
-def calculate_density(red_balls: List[int]) -> float:
-    """计算红球号码的密度分布。"""
+def calculate_density_score(red_balls: List[int]) -> float:
+    """计算红球号码的密度分布得分。"""
     if len(red_balls) < 2:
         return 0.0
     
-    # 计算相邻号码间的平均间距
     sorted_balls = sorted(red_balls)
     gaps = [sorted_balls[i+1] - sorted_balls[i] for i in range(len(sorted_balls)-1)]
-    avg_gap = sum(gaps) / len(gaps)
     
-    # 密度 = 1 / 平均间距（间距越小，密度越大）
-    return 1.0 / (avg_gap + 0.1)
+    # 计算密度指标
+    avg_gap = sum(gaps) / len(gaps)
+    gap_variance = sum((g - avg_gap)**2 for g in gaps) / len(gaps)
+    
+    # 密度得分：间距越小且越均匀，密度得分越高
+    density_score = 1.0 / (avg_gap + 0.1) * (1.0 / (gap_variance + 0.1))
+    
+    return min(density_score, 10.0)  # 限制最大值
+
+def calculate_density_variance(red_balls: List[int]) -> float:
+    """计算密度方差。"""
+    if len(red_balls) < 2:
+        return 0.0
+    
+    sorted_balls = sorted(red_balls)
+    gaps = [sorted_balls[i+1] - sorted_balls[i] for i in range(len(sorted_balls)-1)]
+    
+    if len(gaps) == 0:
+        return 0.0
+    
+    mean_gap = sum(gaps) / len(gaps)
+    variance = sum((g - mean_gap)**2 for g in gaps) / len(gaps)
+    
+    return variance
 
 def calculate_diagonal_patterns(red_balls: List[int]) -> int:
     """计算斜连模式的数量。"""
     sorted_balls = sorted(red_balls)
     diagonal_count = 0
     
-    # 检查不同间隔的斜连
-    for interval in [7, 11, 12]:  # 常见的斜连间隔
+    # 检查不同间隔的斜连模式
+    intervals = [7, 11, 12, 6, 13]  # 常见的斜连间隔
+    
+    for interval in intervals:
         for i in range(len(sorted_balls)):
             for j in range(i+1, len(sorted_balls)):
                 if sorted_balls[j] - sorted_balls[i] == interval:
                     diagonal_count += 1
     
     return diagonal_count
+
+def calculate_diagonal_strength(red_balls: List[int]) -> float:
+    """计算斜连强度。"""
+    sorted_balls = sorted(red_balls)
+    strength = 0.0
+    
+    # 不同间隔的权重
+    interval_weights = {7: 1.0, 11: 1.2, 12: 1.1, 6: 0.8, 13: 0.9}
+    
+    for interval, weight in interval_weights.items():
+        for i in range(len(sorted_balls)):
+            for j in range(i+1, len(sorted_balls)):
+                if sorted_balls[j] - sorted_balls[i] == interval:
+                    strength += weight
+    
+    return strength
 
 def calculate_clustering_score(red_balls: List[int]) -> float:
     """计算号码的聚散程度。"""
@@ -423,25 +519,47 @@ def calculate_clustering_score(red_balls: List[int]) -> float:
     if total_span == 0:
         return 1.0  # 完全聚集
     
-    # 聚散度 = 实际跨度 / 理论最大跨度
-    max_possible_span = 33 - 1  # 红球最大跨度
+    # 计算聚集度：实际跨度与理论最大跨度的比值
+    max_possible_span = 32  # 红球最大跨度 (33-1)
     clustering_score = 1.0 - (total_span / max_possible_span)
     
-    return clustering_score
-
-def is_prime(n: int) -> bool:
-    """判断一个数是否为质数。"""
-    if n < 2:
-        return False
-    if n == 2:
-        return True
-    if n % 2 == 0:
-        return False
+    # 考虑号码分布的均匀性
+    gaps = [sorted_balls[i+1] - sorted_balls[i] for i in range(len(sorted_balls)-1)]
+    gap_std = np.std(gaps) if len(gaps) > 1 else 0
+    uniformity_bonus = 1.0 / (gap_std + 1.0)
     
-    for i in range(3, int(n**0.5) + 1, 2):
-        if n % i == 0:
-            return False
-    return True
+    return clustering_score * uniformity_bonus
+
+def calculate_dispersion_score(red_balls: List[int]) -> float:
+    """计算号码的分散程度。"""
+    if len(red_balls) < 2:
+        return 0.0
+    
+    sorted_balls = sorted(red_balls)
+    
+    # 计算各区间的分布
+    zone_counts = [0, 0, 0]  # 三个区间
+    for ball in sorted_balls:
+        if 1 <= ball <= 11:
+            zone_counts[0] += 1
+        elif 12 <= ball <= 22:
+            zone_counts[1] += 1
+        else:
+            zone_counts[2] += 1
+    
+    # 分散度：各区间分布越均匀，分散度越高
+    total_balls = len(sorted_balls)
+    expected_per_zone = total_balls / 3
+    
+    dispersion = 0.0
+    for count in zone_counts:
+        dispersion += abs(count - expected_per_zone)
+    
+    # 归一化分散度（值越小越分散）
+    max_dispersion = total_balls
+    normalized_dispersion = 1.0 - (dispersion / max_dispersion)
+    
+    return max(0.0, normalized_dispersion)
 
 def create_enhanced_lagged_features(df: pd.DataFrame, lags: List[int]) -> Optional[pd.DataFrame]:
     """创建增强版滞后特征，包含更多交互特征。"""
@@ -459,7 +577,8 @@ def create_enhanced_lagged_features(df: pd.DataFrame, lags: List[int]) -> Option
     for c in ML_INTERACTION_SELF:
         if c in df_features: 
             df_features[f'{c}_sq'] = df_features[c]**2
-            df_features[f'{c}_log'] = np.log1p(df_features[c])  # log(1+x)
+            df_features[f'{c}_log'] = np.log1p(df_features[c])
+            df_features[f'{c}_sqrt'] = np.sqrt(df_features[c])
     
     # 创建滞后特征
     all_feature_cols = df_features.columns.tolist()
@@ -544,7 +663,12 @@ def analyze_enhanced_patterns(df: pd.DataFrame) -> dict:
         return s.mode().iloc[0] if not s.empty and not s.mode().empty else None
     
     # 基本模式
-    for col, name in [('red_sum', 'sum'), ('red_span', 'span'), ('red_odd_count', 'odd_count')]:
+    basic_patterns = [
+        ('red_sum', 'sum'), ('red_span', 'span'), ('red_odd_count', 'odd_count'),
+        ('red_mean', 'mean'), ('red_std', 'std'), ('red_prime_count', 'prime_count')
+    ]
+    
+    for col, name in basic_patterns:
         if col in df.columns: 
             res[f'most_common_{name}'] = safe_mode(df[col])
     
@@ -556,35 +680,50 @@ def analyze_enhanced_patterns(df: pd.DataFrame) -> dict:
             res['most_common_zone_distribution'] = dist_counts.index[0]
     
     # 蓝球模式
-    if 'blue_is_odd' in df.columns: 
-        res['most_common_blue_is_odd'] = safe_mode(df['blue_is_odd'])
-    if 'blue_is_large' in df.columns: 
-        res['most_common_blue_is_large'] = safe_mode(df['blue_is_large'])
+    blue_patterns = [
+        ('blue_is_odd', 'blue_is_odd'), ('blue_is_large', 'blue_is_large'),
+        ('blue_is_prime', 'blue_is_prime'), ('blue_mod_3', 'blue_mod_3')
+    ]
+    
+    for col, name in blue_patterns:
+        if col in df.columns: 
+            res[f'most_common_{name}'] = safe_mode(df[col])
     
     # 高级模式
     if ENABLE_ADVANCED_PATTERNS:
-        if 'red_density' in df.columns:
-            res['most_common_density_range'] = categorize_density(safe_mode(df['red_density']))
-        if 'red_diagonal_count' in df.columns:
-            res['most_common_diagonal_count'] = safe_mode(df['red_diagonal_count'])
-        if 'red_clustering' in df.columns:
-            res['most_common_clustering_level'] = categorize_clustering(safe_mode(df['red_clustering']))
+        advanced_patterns = [
+            ('red_density', 'density'), ('red_clustering', 'clustering'),
+            ('red_dispersion', 'dispersion'), ('red_diagonal_count', 'diagonal_count')
+        ]
+        
+        for col, name in advanced_patterns:
+            if col in df.columns:
+                value = safe_mode(df[col])
+                if value is not None:
+                    if 'density' in name:
+                        res[f'most_common_{name}_range'] = categorize_density(value)
+                    elif 'clustering' in name:
+                        res[f'most_common_{name}_level'] = categorize_clustering(value)
+                    elif 'dispersion' in name:
+                        res[f'most_common_{name}_level'] = categorize_dispersion(value)
+                    else:
+                        res[f'most_common_{name}'] = value
     
     return res
 
 def categorize_density(density_value: float) -> str:
-    """将密度值分类为高、中、低。"""
+    """将密度值分类。"""
     if density_value is None:
         return "未知"
-    if density_value > 0.3:
+    if density_value > 2.0:
         return "高密度"
-    elif density_value > 0.15:
+    elif density_value > 1.0:
         return "中密度"
     else:
         return "低密度"
 
 def categorize_clustering(clustering_value: float) -> str:
-    """将聚散度分类为聚集、分散、均匀。"""
+    """将聚散度分类。"""
     if clustering_value is None:
         return "未知"
     if clustering_value > 0.7:
@@ -593,6 +732,17 @@ def categorize_clustering(clustering_value: float) -> str:
         return "均匀"
     else:
         return "分散"
+
+def categorize_dispersion(dispersion_value: float) -> str:
+    """将分散度分类。"""
+    if dispersion_value is None:
+        return "未知"
+    if dispersion_value > 0.8:
+        return "高分散"
+    elif dispersion_value > 0.5:
+        return "中分散"
+    else:
+        return "低分散"
 
 def analyze_associations(df: pd.DataFrame, weights_config: Dict) -> pd.DataFrame:
     """使用Apriori算法挖掘红球号码之间的关联规则。"""
@@ -623,9 +773,10 @@ def analyze_associations(df: pd.DataFrame, weights_config: Dict) -> pd.DataFrame
         return pd.DataFrame()
 
 def calculate_enhanced_scores(freq_data: Dict, probabilities: Dict, weights: Dict) -> Dict[str, Dict[int, float]]:
-    """增强版评分计算，包含神经网络和集成模型的预测。"""
+    """增强版评分计算，包含多模型预测和高级特征。"""
     r_scores, b_scores = {}, {}
     
+    # 基础数据
     r_freq = freq_data.get('red_freq', {})
     b_freq = freq_data.get('blue_freq', {})
     omission = freq_data.get('current_omission', {})
@@ -633,36 +784,43 @@ def calculate_enhanced_scores(freq_data: Dict, probabilities: Dict, weights: Dic
     max_hist_o = freq_data.get('max_historical_omission_red', {})
     recent_freq = freq_data.get('recent_N_freq_red', {})
     
+    # 预测概率
     r_pred = probabilities.get('red', {})
     b_pred = probabilities.get('blue', {})
-    r_neural = probabilities.get('red_neural', {})
-    b_neural = probabilities.get('blue_neural', {})
     r_ensemble = probabilities.get('red_ensemble', {})
+    b_ensemble = probabilities.get('blue_ensemble', {})
+    r_neural_sim = probabilities.get('red_neural_sim', {})
+    b_neural_sim = probabilities.get('blue_neural_sim', {})
     
     # 红球评分
     for num in RED_BALL_RANGE:
         # 基础分数
         freq_s = (r_freq.get(num, 0)) * weights['FREQ_SCORE_WEIGHT']
-        omit_s = np.exp(-0.005 * (omission.get(num, 0) - avg_int.get(num, 0))**2) * weights['OMISSION_SCORE_WEIGHT']
+        omit_s = np.exp(-0.004 * (omission.get(num, 0) - avg_int.get(num, 0))**2) * weights['OMISSION_SCORE_WEIGHT']
         max_o_ratio = (omission.get(num, 0) / max_hist_o.get(num, 1)) if max_hist_o.get(num, 0) > 0 else 0
         max_o_s = max_o_ratio * weights['MAX_OMISSION_RATIO_SCORE_WEIGHT_RED']
         recent_s = recent_freq.get(num, 0) * weights['RECENT_FREQ_SCORE_WEIGHT_RED']
         ml_s = r_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_RED']
         
-        # 新增：神经网络和集成模型分数
-        neural_s = r_neural.get(num, 0.0) * weights.get('NEURAL_PROB_SCORE_WEIGHT_RED', 0)
+        # 增强分数
         ensemble_s = r_ensemble.get(num, 0.0) * weights.get('ENSEMBLE_PROB_SCORE_WEIGHT_RED', 0)
+        neural_sim_s = r_neural_sim.get(num, 0.0) * weights.get('NEURAL_SIM_SCORE_WEIGHT_RED', 0)
         
-        r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s, neural_s, ensemble_s])
+        # 高级特征分数
+        density_s = calculate_number_density_score(num) * weights.get('DENSITY_SCORE_WEIGHT_RED', 0)
+        diagonal_s = calculate_number_diagonal_score(num) * weights.get('DIAGONAL_SCORE_WEIGHT_RED', 0)
+        
+        r_scores[num] = sum([freq_s, omit_s, max_o_s, recent_s, ml_s, ensemble_s, neural_sim_s, density_s, diagonal_s])
     
     # 蓝球评分
     for num in BLUE_BALL_RANGE:
         freq_s = (b_freq.get(num, 0)) * weights['BLUE_FREQ_SCORE_WEIGHT']
-        omit_s = np.exp(-0.01 * (omission.get(f'blue_{num}', 0) - avg_int.get(f'blue_{num}', 0))**2) * weights['BLUE_OMISSION_SCORE_WEIGHT']
+        omit_s = np.exp(-0.008 * (omission.get(f'blue_{num}', 0) - avg_int.get(f'blue_{num}', 0))**2) * weights['BLUE_OMISSION_SCORE_WEIGHT']
         ml_s = b_pred.get(num, 0.0) * weights['ML_PROB_SCORE_WEIGHT_BLUE']
-        neural_s = b_neural.get(num, 0.0) * weights.get('NEURAL_PROB_SCORE_WEIGHT_BLUE', 0)
+        ensemble_s = b_ensemble.get(num, 0.0) * weights.get('ENSEMBLE_PROB_SCORE_WEIGHT_BLUE', 0)
+        neural_sim_s = b_neural_sim.get(num, 0.0) * weights.get('NEURAL_SIM_SCORE_WEIGHT_BLUE', 0)
         
-        b_scores[num] = sum([freq_s, omit_s, ml_s, neural_s])
+        b_scores[num] = sum([freq_s, omit_s, ml_s, ensemble_s, neural_sim_s])
 
     # 归一化分数
     def normalize_scores(scores_dict):
@@ -679,55 +837,139 @@ def calculate_enhanced_scores(freq_data: Dict, probabilities: Dict, weights: Dic
         'blue_scores': normalize_scores(b_scores)
     }
 
+def calculate_number_density_score(number: int) -> float:
+    """计算单个号码的密度得分。"""
+    # 基于号码在33个位置中的相对位置计算密度
+    position_ratio = number / 33.0
+    
+    # 使用正态分布模拟密度，中间号码密度较高
+    center = 0.5
+    density = math.exp(-((position_ratio - center) ** 2) / (2 * 0.2 ** 2))
+    
+    return density
+
+def calculate_number_diagonal_score(number: int) -> float:
+    """计算单个号码的斜连得分。"""
+    # 基于号码与常见斜连间隔的关系
+    diagonal_intervals = [7, 11, 12, 6, 13]
+    score = 0.0
+    
+    for interval in diagonal_intervals:
+        # 检查该号码是否容易形成斜连
+        if number + interval <= 33 or number - interval >= 1:
+            score += 0.2
+    
+    return score
+
 # ==============================================================================
 # --- 增强机器学习模块 ---
 # ==============================================================================
 
-def train_single_model(model_type: str, ball_type_str: str, ball_number: int, 
-                      X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[Optional[Any], Optional[str]]:
-    """训练单个模型（支持多种模型类型）。"""
+def train_single_lgbm_model(ball_type_str: str, ball_number: int, X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[Optional[LGBMClassifier], Optional[str]]:
+    """训练单个LGBM模型。"""
     if y_train.sum() < MIN_POSITIVE_SAMPLES_FOR_ML or y_train.nunique() < 2:
         return None, None
+        
+    model_key = f'lgbm_{ball_number}'
+    model_params = LGBM_PARAMS.copy()
     
-    model_key = f'{model_type}_{ball_number}'
-    
+    if (pos_count := y_train.sum()) > 0:
+        model_params['scale_pos_weight'] = (len(y_train) - pos_count) / pos_count
+        
     try:
-        if model_type == 'lgbm':
-            model_params = LGBM_PARAMS.copy()
-            if (pos_count := y_train.sum()) > 0:
-                model_params['scale_pos_weight'] = (len(y_train) - pos_count) / pos_count
-            model = LGBMClassifier(**model_params)
-            
-        elif model_type == 'neural' and ENABLE_NEURAL_NETWORK:
-            # 标准化特征用于神经网络
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_train)
-            model = MLPClassifier(**NEURAL_NETWORK_PARAMS)
-            model.fit(X_scaled, y_train)
-            # 保存scaler以便预测时使用
-            model.scaler = scaler
-            return model, model_key
-            
-        elif model_type == 'rf' and ENABLE_ENSEMBLE_MODELS:
-            model = RandomForestClassifier(**ENSEMBLE_MODELS_CONFIG['random_forest'])
-            
-        elif model_type == 'gb' and ENABLE_ENSEMBLE_MODELS:
-            model = GradientBoostingClassifier(**ENSEMBLE_MODELS_CONFIG['gradient_boosting'])
-            
-        else:
-            return None, None
-        
-        if model_type != 'neural':  # neural已经在上面fit了
-            model.fit(X_train, y_train)
-        
+        model = LGBMClassifier(**model_params)
+        model.fit(X_train, y_train)
         return model, model_key
-        
     except Exception as e:
-        logger.debug(f"训练{model_type} for {ball_type_str} {ball_number} 失败: {e}")
+        logger.debug(f"训练LGBM for {ball_type_str} {ball_number} 失败: {e}")
         return None, None
 
+def train_ensemble_models(X_train: pd.DataFrame, y_train: pd.Series, ball_number: int) -> List[LGBMClassifier]:
+    """训练集成模型（多个LGBM模型）。"""
+    if not ENABLE_MULTI_MODEL_ENSEMBLE:
+        return []
+    
+    models = []
+    
+    for i in range(ENSEMBLE_MODELS_COUNT):
+        try:
+            # 为每个模型使用不同的随机种子和参数
+            model_params = LGBM_PARAMS.copy()
+            model_params['seed'] = 42 + i * 10
+            model_params['feature_fraction'] = 0.8 + i * 0.05
+            model_params['bagging_fraction'] = 0.85 + i * 0.03
+            
+            if (pos_count := y_train.sum()) > 0:
+                model_params['scale_pos_weight'] = (len(y_train) - pos_count) / pos_count
+            
+            model = LGBMClassifier(**model_params)
+            model.fit(X_train, y_train)
+            models.append(model)
+            
+        except Exception as e:
+            logger.debug(f"训练集成模型 {i} for ball {ball_number} 失败: {e}")
+            continue
+    
+    return models
+
+def simulate_neural_network_prediction(X_train: pd.DataFrame, y_train: pd.Series, X_predict: pd.DataFrame) -> float:
+    """使用数学函数模拟神经网络预测。"""
+    if not ENABLE_NEURAL_SIMULATION or X_train.empty or X_predict.empty:
+        return 0.0
+    
+    try:
+        # 简化的神经网络模拟
+        n_features = len(X_train.columns)
+        
+        # 模拟权重（基于特征重要性）
+        feature_importance = []
+        for col in X_train.columns:
+            correlation = abs(X_train[col].corr(y_train))
+            if pd.isna(correlation):
+                correlation = 0.0
+            feature_importance.append(correlation)
+        
+        # 归一化权重
+        total_importance = sum(feature_importance) + 1e-9
+        weights = [imp / total_importance for imp in feature_importance]
+        
+        # 模拟前向传播
+        input_values = X_predict.iloc[0].values
+        
+        # 第一层（隐藏层1）
+        hidden1_size = NEURAL_SIMULATION_LAYERS[0]
+        hidden1_output = []
+        
+        for i in range(hidden1_size):
+            weighted_sum = sum(input_values[j] * weights[j % len(weights)] for j in range(len(input_values)))
+            # 添加偏置
+            weighted_sum += random.uniform(-0.1, 0.1)
+            # 激活函数
+            activated = tanh_activation(weighted_sum / 100.0)  # 缩放输入
+            hidden1_output.append(activated)
+        
+        # 第二层（隐藏层2）
+        hidden2_size = NEURAL_SIMULATION_LAYERS[1]
+        hidden2_output = []
+        
+        for i in range(hidden2_size):
+            weighted_sum = sum(hidden1_output[j] * (0.5 + j * 0.1 / len(hidden1_output)) for j in range(len(hidden1_output)))
+            weighted_sum += random.uniform(-0.05, 0.05)
+            activated = relu_activation(weighted_sum)
+            hidden2_output.append(activated)
+        
+        # 输出层
+        output_sum = sum(hidden2_output[i] * (0.3 + i * 0.2 / len(hidden2_output)) for i in range(len(hidden2_output)))
+        output_prob = sigmoid(output_sum)
+        
+        return min(max(output_prob, 0.0), 1.0)  # 确保在[0,1]范围内
+        
+    except Exception as e:
+        logger.debug(f"神经网络模拟预测失败: {e}")
+        return 0.0
+
 def train_enhanced_prediction_models(df_train_raw: pd.DataFrame, ml_lags_list: List[int]) -> Optional[Dict[str, Any]]:
-    """训练增强版预测模型，包含多种模型类型。"""
+    """训练增强版预测模型。"""
     X = create_enhanced_lagged_features(df_train_raw.copy(), ml_lags_list)
     if X is None or X.empty:
         logger.warning("创建滞后特征失败或结果为空，跳过模型训练。")
@@ -740,58 +982,64 @@ def train_enhanced_prediction_models(df_train_raw: pd.DataFrame, ml_lags_list: L
     red_cols = [f'red{i+1}' for i in range(6)]
     trained_models = {
         'red': {}, 'blue': {}, 
-        'red_neural': {}, 'blue_neural': {},
-        'red_ensemble': {},
-        'feature_cols': X.columns.tolist()
+        'red_ensemble': {}, 'blue_ensemble': {},
+        'feature_cols': X.columns.tolist(),
+        'feature_importance': {}
     }
-    
-    # 定义要训练的模型类型
-    model_types = ['lgbm']
-    if ENABLE_NEURAL_NETWORK:
-        model_types.append('neural')
-    if ENABLE_ENSEMBLE_MODELS:
-        model_types.extend(['rf', 'gb'])
     
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = {}
         
-        # 为每个红球和每种模型类型提交训练任务
+        # 为每个红球提交训练任务
         for ball_num in RED_BALL_RANGE:
             y = target_df[red_cols].eq(ball_num).any(axis=1).astype(int)
-            for model_type in model_types:
-                future = executor.submit(train_single_model, model_type, '红球', ball_num, X, y)
-                futures[future] = ('red', ball_num, model_type)
+            future = executor.submit(train_single_lgbm_model, '红球', ball_num, X, y)
+            futures[future] = ('red', ball_num)
         
-        # 为每个蓝球和每种模型类型提交训练任务
+        # 为每个蓝球提交训练任务
         for ball_num in BLUE_BALL_RANGE:
             y = target_df['blue'].eq(ball_num).astype(int)
-            for model_type in model_types:
-                future = executor.submit(train_single_model, model_type, '蓝球', ball_num, X, y)
-                futures[future] = ('blue', ball_num, model_type)
-        
+            future = executor.submit(train_single_lgbm_model, '蓝球', ball_num, X, y)
+            futures[future] = ('blue', ball_num)
+            
         for future in concurrent.futures.as_completed(futures):
-            ball_type, ball_num, model_type = futures[future]
+            ball_type, ball_num = futures[future]
             try:
                 model, model_key = future.result()
                 if model and model_key:
-                    if model_type == 'lgbm':
-                        trained_models[ball_type][model_key] = model
-                    elif model_type == 'neural':
-                        trained_models[f'{ball_type}_neural'][model_key] = model
-                    elif model_type in ['rf', 'gb']:
-                        if f'{ball_type}_ensemble' not in trained_models:
-                            trained_models[f'{ball_type}_ensemble'] = {}
-                        trained_models[f'{ball_type}_ensemble'][model_key] = model
+                    trained_models[ball_type][model_key] = model
+                    
+                    # 收集特征重要性
+                    if ENABLE_FEATURE_IMPORTANCE and hasattr(model, 'feature_importances_'):
+                        trained_models['feature_importance'][model_key] = model.feature_importances_
                         
             except Exception as e:
-                logger.error(f"训练球号 {ball_num} ({ball_type}, {model_type}) 的模型时出现异常: {e}")
+                logger.error(f"训练球号 {ball_num} ({ball_type}) 的模型时出现异常: {e}")
+    
+    # 训练集成模型
+    if ENABLE_MULTI_MODEL_ENSEMBLE:
+        for ball_num in RED_BALL_RANGE:
+            y = target_df[red_cols].eq(ball_num).any(axis=1).astype(int)
+            ensemble_models = train_ensemble_models(X, y, ball_num)
+            if ensemble_models:
+                trained_models['red_ensemble'][f'ensemble_{ball_num}'] = ensemble_models
+        
+        for ball_num in BLUE_BALL_RANGE:
+            y = target_df['blue'].eq(ball_num).astype(int)
+            ensemble_models = train_ensemble_models(X, y, ball_num)
+            if ensemble_models:
+                trained_models['blue_ensemble'][f'ensemble_{ball_num}'] = ensemble_models
 
-    return trained_models if any(trained_models[key] for key in trained_models if key != 'feature_cols') else None
+    return trained_models if any(trained_models[key] for key in ['red', 'blue']) else None
 
 def predict_enhanced_probabilities(df_historical: pd.DataFrame, trained_models: Optional[Dict], 
                                  ml_lags_list: List[int]) -> Dict[str, Dict[int, float]]:
     """使用增强版模型预测下一期每个号码的出现概率。"""
-    probs = {'red': {}, 'blue': {}, 'red_neural': {}, 'blue_neural': {}, 'red_ensemble': {}}
+    probs = {
+        'red': {}, 'blue': {}, 
+        'red_ensemble': {}, 'blue_ensemble': {},
+        'red_neural_sim': {}, 'blue_neural_sim': {}
+    }
     
     if not trained_models or not (feat_cols := trained_models.get('feature_cols')):
         return probs
@@ -806,75 +1054,99 @@ def predict_enhanced_probabilities(df_historical: pd.DataFrame, trained_models: 
     
     predict_X = predict_X.reindex(columns=feat_cols, fill_value=0)
     
-    # 预测各种模型类型
-    model_mappings = [
-        ('red', RED_BALL_RANGE, 'lgbm'),
-        ('blue', BLUE_BALL_RANGE, 'lgbm'),
-        ('red_neural', RED_BALL_RANGE, 'neural'),
-        ('blue_neural', BLUE_BALL_RANGE, 'neural'),
-        ('red_ensemble', RED_BALL_RANGE, 'ensemble')
-    ]
-    
-    for prob_key, ball_range, model_suffix in model_mappings:
-        model_dict = trained_models.get(prob_key, {})
-        if not model_dict:
-            continue
-            
+    # 基础LGBM预测
+    for ball_type, ball_range in [('red', RED_BALL_RANGE), ('blue', BLUE_BALL_RANGE)]:
         for ball_num in ball_range:
-            model_key = f'{model_suffix}_{ball_num}'
-            if model := model_dict.get(model_key):
+            if (model := trained_models.get(ball_type, {}).get(f'lgbm_{ball_num}')):
                 try:
-                    if hasattr(model, 'scaler'):  # 神经网络模型
-                        X_scaled = model.scaler.transform(predict_X)
-                        prob = model.predict_proba(X_scaled)[0, 1]
-                    else:
-                        prob = model.predict_proba(predict_X)[0, 1]
-                    probs[prob_key][ball_num] = prob
+                    probs[ball_type][ball_num] = model.predict_proba(predict_X)[0, 1]
                 except Exception:
                     pass
     
-    # 集成多个模型的预测结果
-    if ENABLE_ENSEMBLE_MODELS and 'red_ensemble' in probs:
-        ensemble_probs = {}
-        for ball_num in RED_BALL_RANGE:
-            model_probs = []
-            for model_type in ['rf', 'gb']:
-                model_key = f'{model_type}_{ball_num}'
-                if model := trained_models.get('red_ensemble', {}).get(model_key):
+    # 集成模型预测
+    if ENABLE_MULTI_MODEL_ENSEMBLE:
+        for ball_type, ball_range in [('red', RED_BALL_RANGE), ('blue', BLUE_BALL_RANGE)]:
+            ensemble_key = f'{ball_type}_ensemble'
+            for ball_num in ball_range:
+                ensemble_models = trained_models.get(ensemble_key, {}).get(f'ensemble_{ball_num}', [])
+                if ensemble_models:
                     try:
-                        prob = model.predict_proba(predict_X)[0, 1]
-                        model_probs.append(prob)
+                        ensemble_probs = []
+                        for model in ensemble_models:
+                            prob = model.predict_proba(predict_X)[0, 1]
+                            ensemble_probs.append(prob)
+                        
+                        if ensemble_probs:
+                            probs[ensemble_key][ball_num] = np.mean(ensemble_probs)
                     except Exception:
                         pass
-            if model_probs:
-                ensemble_probs[ball_num] = np.mean(model_probs)
-        probs['red_ensemble'] = ensemble_probs
+    
+    # 神经网络模拟预测
+    if ENABLE_NEURAL_SIMULATION:
+        red_cols = [f'red{i+1}' for i in range(6)]
+        train_data = df_historical.iloc[:-1]  # 用于训练的历史数据
+        
+        if len(train_data) > max_lag:
+            train_X = create_enhanced_lagged_features(train_data, ml_lags_list)
+            if train_X is not None and not train_X.empty:
+                train_target_df = train_data.loc[train_X.index]
+                
+                for ball_num in RED_BALL_RANGE:
+                    try:
+                        y_train = train_target_df[red_cols].eq(ball_num).any(axis=1).astype(int)
+                        neural_prob = simulate_neural_network_prediction(train_X, y_train, predict_X)
+                        probs['red_neural_sim'][ball_num] = neural_prob
+                    except Exception:
+                        pass
+                
+                for ball_num in BLUE_BALL_RANGE:
+                    try:
+                        y_train = train_target_df['blue'].eq(ball_num).astype(int)
+                        neural_prob = simulate_neural_network_prediction(train_X, y_train, predict_X)
+                        probs['blue_neural_sim'][ball_num] = neural_prob
+                    except Exception:
+                        pass
     
     return probs
 
-def analyze_feature_importance(trained_models: Dict, feature_names: List[str]) -> Dict[str, Any]:
+def analyze_feature_importance(trained_models: Dict) -> Dict[str, Any]:
     """分析特征重要性。"""
     if not ENABLE_FEATURE_IMPORTANCE or not trained_models:
         return {}
     
     importance_analysis = {}
+    feature_importance_data = trained_models.get('feature_importance', {})
+    feature_names = trained_models.get('feature_cols', [])
     
-    # 分析LightGBM模型的特征重要性
-    lgbm_models = trained_models.get('red', {})
-    if lgbm_models:
+    if feature_importance_data and feature_names:
+        # 计算平均特征重要性
         all_importances = []
-        for model_key, model in lgbm_models.items():
-            if hasattr(model, 'feature_importances_'):
-                all_importances.append(model.feature_importances_)
+        for model_key, importances in feature_importance_data.items():
+            if len(importances) == len(feature_names):
+                all_importances.append(importances)
         
         if all_importances:
             avg_importance = np.mean(all_importances, axis=0)
             feature_importance_dict = dict(zip(feature_names, avg_importance))
             
-            # 排序并获取前10个最重要的特征
+            # 排序并获取前15个最重要的特征
             sorted_features = sorted(feature_importance_dict.items(), key=lambda x: x[1], reverse=True)
-            importance_analysis['top_features'] = sorted_features[:10]
+            importance_analysis['top_features'] = sorted_features[:15]
             importance_analysis['feature_importance_dict'] = feature_importance_dict
+            
+            # 分析特征类型分布
+            feature_types = defaultdict(float)
+            for feature, importance in sorted_features:
+                if 'lag' in feature:
+                    feature_types['滞后特征'] += importance
+                elif '_x_' in feature:
+                    feature_types['交互特征'] += importance
+                elif any(pattern in feature for pattern in ['density', 'diagonal', 'clustering']):
+                    feature_types['高级特征'] += importance
+                else:
+                    feature_types['基础特征'] += importance
+            
+            importance_analysis['feature_type_importance'] = dict(feature_types)
     
     return importance_analysis
 
@@ -884,7 +1156,7 @@ def analyze_feature_importance(trained_models: Dict, feature_names: List[str]) -
 
 def generate_enhanced_combinations(scores_data: Dict, pattern_data: Dict, arm_rules: pd.DataFrame, 
                                  weights_config: Dict) -> Tuple[List[Dict], List[str]]:
-    """生成增强版推荐组合，包含更多策略。"""
+    """生成增强版推荐组合。"""
     num_to_gen = weights_config['NUM_COMBINATIONS_TO_GENERATE']
     r_scores = scores_data.get('red_scores', {})
     b_scores = scores_data.get('blue_scores', {})
@@ -903,13 +1175,13 @@ def generate_enhanced_combinations(scores_data: Dict, pattern_data: Dict, arm_ru
         return [], ["候选池号码不足。"]
 
     # 生成大量初始组合
-    large_pool_size = max(num_to_gen * 60, 600)  # 增加候选池大小
+    large_pool_size = max(num_to_gen * 80, 800)  # 增加候选池大小
     gen_pool, unique_combos = [], set()
     
     r_weights = np.array([r_scores.get(n, 0) + 1 for n in r_cand_pool])
     r_probs = r_weights / r_weights.sum() if r_weights.sum() > 0 else None
     
-    for _ in range(large_pool_size * 25):
+    for _ in range(large_pool_size * 30):
         if len(gen_pool) >= large_pool_size: 
             break
             
@@ -932,12 +1204,15 @@ def generate_enhanced_combinations(scores_data: Dict, pattern_data: Dict, arm_ru
         base_score = sum(r_scores.get(r, 0) for r in c['red']) + b_scores.get(c['blue'], 0)
         
         # 模式匹配奖励
-        pattern_bonus = calculate_pattern_bonus(c, pattern_data, weights_config)
+        pattern_bonus = calculate_enhanced_pattern_bonus(c, pattern_data, weights_config)
         
         # ARM奖励
         arm_bonus = calculate_arm_bonus(c, arm_rules, weights_config)
         
-        total_score = base_score + pattern_bonus + arm_bonus
+        # 高级特征奖励
+        advanced_bonus = calculate_advanced_feature_bonus(c, weights_config)
+        
+        total_score = base_score + pattern_bonus + arm_bonus + advanced_bonus
         
         scored_combos.append({
             'combination': c, 
@@ -945,7 +1220,8 @@ def generate_enhanced_combinations(scores_data: Dict, pattern_data: Dict, arm_ru
             'red_tuple': tuple(c['red']),
             'base_score': base_score,
             'pattern_bonus': pattern_bonus,
-            'arm_bonus': arm_bonus
+            'arm_bonus': arm_bonus,
+            'advanced_bonus': advanced_bonus
         })
 
     # 多样性筛选和最终选择
@@ -992,13 +1268,14 @@ def generate_enhanced_combinations(scores_data: Dict, pattern_data: Dict, arm_ru
         output_strs.append(
             f"  注 {i+1}: 红球 [{r_str}] 蓝球 [{b_str}] "
             f"(总分: {c['score']:.2f} = 基础: {c['base_score']:.2f} + "
-            f"模式: {c['pattern_bonus']:.2f} + ARM: {c['arm_bonus']:.2f})"
+            f"模式: {c['pattern_bonus']:.2f} + ARM: {c['arm_bonus']:.2f} + "
+            f"高级: {c['advanced_bonus']:.2f})"
         )
     
     return final_recs, output_strs
 
-def calculate_pattern_bonus(combination: Dict, pattern_data: Dict, weights_config: Dict) -> float:
-    """计算模式匹配奖励分数。"""
+def calculate_enhanced_pattern_bonus(combination: Dict, pattern_data: Dict, weights_config: Dict) -> float:
+    """计算增强版模式匹配奖励分数。"""
     bonus = 0.0
     reds = combination['red']
     blue = combination['blue']
@@ -1028,7 +1305,7 @@ def calculate_pattern_bonus(combination: Dict, pattern_data: Dict, weights_confi
     # 高级模式匹配
     if ENABLE_ADVANCED_PATTERNS:
         # 密度模式匹配
-        combo_density = calculate_density(reds)
+        combo_density = calculate_density_score(reds)
         combo_density_cat = categorize_density(combo_density)
         if combo_density_cat == pattern_data.get('most_common_density_range'):
             bonus += weights_config.get('DENSITY_PATTERN_BONUS', 0)
@@ -1043,6 +1320,12 @@ def calculate_pattern_bonus(combination: Dict, pattern_data: Dict, weights_confi
         combo_clustering_cat = categorize_clustering(combo_clustering)
         if combo_clustering_cat == pattern_data.get('most_common_clustering_level'):
             bonus += weights_config.get('SHAPE_PATTERN_BONUS', 0)
+        
+        # 分散模式匹配
+        combo_dispersion = calculate_dispersion_score(reds)
+        combo_dispersion_cat = categorize_dispersion(combo_dispersion)
+        if combo_dispersion_cat == pattern_data.get('most_common_dispersion_level'):
+            bonus += weights_config.get('CLUSTERING_PATTERN_BONUS', 0)
     
     return bonus
 
@@ -1071,6 +1354,35 @@ def calculate_arm_bonus(combination: Dict, arm_rules: pd.DataFrame, weights_conf
     
     return bonus
 
+def calculate_advanced_feature_bonus(combination: Dict, weights_config: Dict) -> float:
+    """计算高级特征奖励分数。"""
+    bonus = 0.0
+    reds = combination['red']
+    
+    if not ENABLE_ADVANCED_PATTERNS:
+        return bonus
+    
+    # 对数特征奖励
+    red_sum = sum(reds)
+    log_sum = math.log1p(red_sum)
+    if 3.5 <= log_sum <= 4.2:  # 理想的对数和值范围
+        bonus += weights_config.get('LOGARITHMIC_PATTERN_BONUS', 0)
+    
+    # 质数分布奖励
+    prime_count = sum(1 for r in reds if is_prime(r))
+    if 2 <= prime_count <= 3:  # 理想的质数个数
+        bonus += weights_config.get('SHAPE_PATTERN_BONUS', 0) * 0.5
+    
+    # 数字根奖励（数字根为1-9的循环）
+    digit_root = red_sum
+    while digit_root >= 10:
+        digit_root = sum(int(d) for d in str(digit_root))
+    
+    if digit_root in [1, 4, 7]:  # 某些数字根可能更有利
+        bonus += weights_config.get('SHAPE_PATTERN_BONUS', 0) * 0.3
+    
+    return bonus
+
 # ==============================================================================
 # --- 增强回测与优化模块 ---
 # ==============================================================================
@@ -1083,7 +1395,10 @@ def run_enhanced_analysis_and_recommendation(df_hist: pd.DataFrame, ml_lags: Lis
     ml_models = train_enhanced_prediction_models(df_hist, ml_lags)
     
     probabilities = (predict_enhanced_probabilities(df_hist, ml_models, ml_lags) 
-                    if ml_models else {'red': {}, 'blue': {}, 'red_neural': {}, 'blue_neural': {}, 'red_ensemble': {}})
+                    if ml_models else {
+                        'red': {}, 'blue': {}, 'red_ensemble': {}, 'blue_ensemble': {},
+                        'red_neural_sim': {}, 'blue_neural_sim': {}
+                    })
     
     scores = calculate_enhanced_scores(freq_data, probabilities, weights_config)
     recs, rec_strings = generate_enhanced_combinations(scores, patt_data, arm_rules, weights_config)
@@ -1091,7 +1406,7 @@ def run_enhanced_analysis_and_recommendation(df_hist: pd.DataFrame, ml_lags: Lis
     # 特征重要性分析
     feature_importance = {}
     if ml_models and ENABLE_FEATURE_IMPORTANCE:
-        feature_importance = analyze_feature_importance(ml_models, ml_models.get('feature_cols', []))
+        feature_importance = analyze_feature_importance(ml_models)
     
     analysis_summary = {
         'frequency_omission': freq_data, 
@@ -1117,6 +1432,7 @@ def run_enhanced_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_con
     
     # 自动纠错机制
     correction_history = []
+    original_weights = weights_config.copy()
     
     logger.info("增强版策略回测已启动...")
     start_time = time.time()
@@ -1130,7 +1446,7 @@ def run_enhanced_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_con
             
             # 应用自动纠错
             if ENABLE_AUTO_CORRECTION and correction_history:
-                weights_config = apply_auto_correction(weights_config, correction_history)
+                weights_config = apply_enhanced_auto_correction(weights_config, correction_history, original_weights)
             
             predicted_combos, _, _, _, _ = run_enhanced_analysis_and_recommendation(
                 hist_data, ml_lags, weights_config, arm_rules
@@ -1169,7 +1485,8 @@ def run_enhanced_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_con
                     'predicted_reds': combo['red'],
                     'predicted_blue': combo['blue'],
                     'actual_reds': list(actual_red_set),
-                    'actual_blue': actual_blue
+                    'actual_blue': actual_blue,
+                    'combo_score': combo_dict.get('score', 0)
                 }
                 results.append(result_record)
                 period_results.append(result_record)
@@ -1193,15 +1510,17 @@ def run_enhanced_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_con
                     'period': actual_outcome['期号'],
                     'predictions': period_results,
                     'best_red_hits': period_max_red_hits,
-                    'blue_hit': period_blue_hit_on_max_red
+                    'blue_hit': period_blue_hit_on_max_red,
+                    'avg_combo_score': np.mean([p['combo_score'] for p in period_results])
                 })
                 
                 # 只保留最近的纠错历史
-                if len(correction_history) > 20:
+                memory_periods = weights_config.get('CORRECTION_MEMORY_PERIODS', 15)
+                if len(correction_history) > memory_periods:
                     correction_history.pop(0)
 
         # 打印进度
-        if current_iter == 1 or current_iter % 10 == 0 or current_iter == num_periods:
+        if current_iter == 1 or current_iter % 15 == 0 or current_iter == num_periods:
             elapsed = time.time() - start_time
             avg_time = elapsed / current_iter
             remaining_time = avg_time * (num_periods - current_iter)
@@ -1213,37 +1532,77 @@ def run_enhanced_backtest(full_df: pd.DataFrame, ml_lags: List[int], weights_con
     return pd.DataFrame(results), {
         'prize_counts': dict(prize_counts), 
         'best_hits_per_period': pd.DataFrame(best_hits_per_period),
-        'correction_history': correction_history
+        'correction_history': correction_history,
+        'final_weights': weights_config
     }
 
-def apply_auto_correction(weights_config: Dict, correction_history: List[Dict]) -> Dict:
-    """基于历史表现自动调整权重配置。"""
+def apply_enhanced_auto_correction(weights_config: Dict, correction_history: List[Dict], 
+                                 original_weights: Dict) -> Dict:
+    """增强版自动纠错机制。"""
     if not correction_history:
         return weights_config
     
     adjusted_weights = weights_config.copy()
+    sensitivity = weights_config.get('AUTO_CORRECTION_SENSITIVITY', 0.15)
     
     # 分析最近的表现
     recent_performance = correction_history[-10:]  # 最近10期
     avg_red_hits = np.mean([p['best_red_hits'] for p in recent_performance])
     blue_hit_rate = np.mean([p['blue_hit'] for p in recent_performance])
+    avg_combo_score = np.mean([p['avg_combo_score'] for p in recent_performance])
+    
+    # 计算表现趋势
+    if len(recent_performance) >= 5:
+        recent_5 = recent_performance[-5:]
+        earlier_5 = recent_performance[-10:-5] if len(recent_performance) >= 10 else recent_performance[:-5]
+        
+        if earlier_5:
+            recent_avg = np.mean([p['best_red_hits'] for p in recent_5])
+            earlier_avg = np.mean([p['best_red_hits'] for p in earlier_5])
+            trend = recent_avg - earlier_avg
+        else:
+            trend = 0
+    else:
+        trend = 0
     
     # 根据表现调整权重
-    if avg_red_hits < 2.0:  # 红球命中率低
-        # 增加频率和遗漏权重，减少ML权重
-        adjusted_weights['FREQ_SCORE_WEIGHT'] *= 1.1
-        adjusted_weights['OMISSION_SCORE_WEIGHT'] *= 1.1
-        adjusted_weights['ML_PROB_SCORE_WEIGHT_RED'] *= 0.9
-    elif avg_red_hits > 3.5:  # 红球命中率高
-        # 增加ML权重，减少传统权重
-        adjusted_weights['ML_PROB_SCORE_WEIGHT_RED'] *= 1.1
-        adjusted_weights['FREQ_SCORE_WEIGHT'] *= 0.95
+    if avg_red_hits < 1.8:  # 红球命中率很低
+        # 增加传统分析权重，减少ML权重
+        adjusted_weights['FREQ_SCORE_WEIGHT'] *= (1 + sensitivity)
+        adjusted_weights['OMISSION_SCORE_WEIGHT'] *= (1 + sensitivity)
+        adjusted_weights['ML_PROB_SCORE_WEIGHT_RED'] *= (1 - sensitivity)
+        adjusted_weights['ENSEMBLE_PROB_SCORE_WEIGHT_RED'] *= (1 - sensitivity * 0.5)
+        
+    elif avg_red_hits > 3.2:  # 红球命中率很高
+        # 增加ML权重，适度减少传统权重
+        adjusted_weights['ML_PROB_SCORE_WEIGHT_RED'] *= (1 + sensitivity)
+        adjusted_weights['ENSEMBLE_PROB_SCORE_WEIGHT_RED'] *= (1 + sensitivity * 0.8)
+        adjusted_weights['FREQ_SCORE_WEIGHT'] *= (1 - sensitivity * 0.3)
     
-    if blue_hit_rate < 0.3:  # 蓝球命中率低
-        adjusted_weights['BLUE_FREQ_SCORE_WEIGHT'] *= 1.1
-        adjusted_weights['ML_PROB_SCORE_WEIGHT_BLUE'] *= 0.9
-    elif blue_hit_rate > 0.6:  # 蓝球命中率高
-        adjusted_weights['ML_PROB_SCORE_WEIGHT_BLUE'] *= 1.1
+    if blue_hit_rate < 0.25:  # 蓝球命中率低
+        adjusted_weights['BLUE_FREQ_SCORE_WEIGHT'] *= (1 + sensitivity)
+        adjusted_weights['ML_PROB_SCORE_WEIGHT_BLUE'] *= (1 - sensitivity * 0.5)
+        
+    elif blue_hit_rate > 0.65:  # 蓝球命中率高
+        adjusted_weights['ML_PROB_SCORE_WEIGHT_BLUE'] *= (1 + sensitivity)
+        adjusted_weights['ENSEMBLE_PROB_SCORE_WEIGHT_BLUE'] *= (1 + sensitivity * 0.7)
+    
+    # 根据趋势调整
+    if trend < -0.5:  # 表现下降趋势
+        # 增加高级特征权重
+        for key in ['DENSITY_SCORE_WEIGHT_RED', 'DIAGONAL_SCORE_WEIGHT_RED', 'NEURAL_SIM_SCORE_WEIGHT_RED']:
+            if key in adjusted_weights:
+                adjusted_weights[key] *= (1 + sensitivity * 0.5)
+    
+    # 确保权重不会偏离原始值太远
+    for key, value in adjusted_weights.items():
+        if key in original_weights:
+            original_value = original_weights[key]
+            max_change = original_value * 0.5  # 最大变化50%
+            adjusted_weights[key] = max(
+                original_value - max_change,
+                min(original_value + max_change, value)
+            )
     
     return adjusted_weights
 
@@ -1260,16 +1619,18 @@ def enhanced_objective(trial: optuna.trial.Trial, df_for_opt: pd.DataFrame,
     for key, value in DEFAULT_WEIGHTS.items():
         if isinstance(value, int):
             if 'NUM_COMBINATIONS' in key: 
-                trial_weights[key] = trial.suggest_int(key, 8, 16)
+                trial_weights[key] = trial.suggest_int(key, 10, 20)
             elif 'TOP_N' in key: 
-                trial_weights[key] = trial.suggest_int(key, 20, 35)
+                trial_weights[key] = trial.suggest_int(key, 22, 35)
+            elif 'MEMORY_PERIODS' in key:
+                trial_weights[key] = trial.suggest_int(key, 10, 25)
             else: 
-                trial_weights[key] = trial.suggest_int(key, max(0, value - 3), value + 3)
+                trial_weights[key] = trial.suggest_int(key, max(0, value - 4), value + 4)
         elif isinstance(value, float):
-            if any(k in key for k in ['PERCENT', 'FACTOR', 'SUPPORT', 'CONFIDENCE']):
-                trial_weights[key] = trial.suggest_float(key, value * 0.3, value * 1.8)
+            if any(k in key for k in ['PERCENT', 'FACTOR', 'SUPPORT', 'CONFIDENCE', 'SENSITIVITY']):
+                trial_weights[key] = trial.suggest_float(key, value * 0.2, value * 2.0)
             else:
-                trial_weights[key] = trial.suggest_float(key, value * 0.3, value * 2.5)
+                trial_weights[key] = trial.suggest_float(key, value * 0.2, value * 3.0)
 
     full_trial_weights = DEFAULT_WEIGHTS.copy()
     full_trial_weights.update(trial_weights)
@@ -1282,8 +1643,8 @@ def enhanced_objective(trial: optuna.trial.Trial, df_for_opt: pd.DataFrame,
     
     # 增强版评分函数
     prize_weights = {
-        '一等奖': 10000, '二等奖': 2000, '三等奖': 500, 
-        '四等奖': 50, '五等奖': 5, '六等奖': 1
+        '一等奖': 50000, '二等奖': 10000, '三等奖': 2000, 
+        '四等奖': 200, '五等奖': 20, '六等奖': 2
     }
     
     base_score = sum(
@@ -1291,13 +1652,30 @@ def enhanced_objective(trial: optuna.trial.Trial, df_for_opt: pd.DataFrame,
         for p, c in backtest_stats.get('prize_counts', {}).items()
     )
     
-    # 添加稳定性奖励
+    # 添加多维度奖励
     best_hits_df = backtest_stats.get('best_hits_per_period')
     if best_hits_df is not None and not best_hits_df.empty:
-        # 奖励稳定的命中率
+        # 稳定性奖励
         red_hits_std = best_hits_df['best_red_hits'].std()
-        stability_bonus = max(0, 100 - red_hits_std * 20)  # 标准差越小奖励越高
-        base_score += stability_bonus
+        stability_bonus = max(0, 200 - red_hits_std * 50)
+        
+        # 一致性奖励（连续命中）
+        consecutive_hits = 0
+        max_consecutive = 0
+        for hits in best_hits_df['best_red_hits']:
+            if hits >= 3:
+                consecutive_hits += 1
+                max_consecutive = max(max_consecutive, consecutive_hits)
+            else:
+                consecutive_hits = 0
+        
+        consistency_bonus = max_consecutive * 50
+        
+        # 蓝球覆盖奖励
+        blue_coverage = best_hits_df['blue_hit'].mean()
+        blue_bonus = blue_coverage * 300
+        
+        base_score += stability_bonus + consistency_bonus + blue_bonus
     
     return base_score
 
@@ -1307,7 +1685,7 @@ def enhanced_optuna_progress_callback(study: optuna.study.Study, trial: optuna.t
     global OPTUNA_START_TIME
     current_iter = trial.number + 1
     
-    if current_iter == 1 or current_iter % 15 == 0 or current_iter == total_trials:
+    if current_iter == 1 or current_iter % 20 == 0 or current_iter == total_trials:
         elapsed = time.time() - OPTUNA_START_TIME
         avg_time = elapsed / current_iter
         remaining_time = avg_time * (total_trials - current_iter)
@@ -1378,7 +1756,7 @@ if __name__ == "__main__":
     optuna_summary = None
 
     if ENABLE_OPTUNA_OPTIMIZATION:
-        logger.info("\n" + "="*30 + " 增强Optuna优化模式 " + "="*30)
+        logger.info("\n" + "="*35 + " 增强Optuna优化模式 " + "="*35)
         set_console_verbosity(logging.INFO, use_simple_formatter=False)
         
         optuna_arm_rules = analyze_associations(main_df, DEFAULT_WEIGHTS)
@@ -1413,23 +1791,25 @@ if __name__ == "__main__":
     file_handler.setFormatter(report_formatter)
     global_console_handler.setFormatter(report_formatter)
     
-    logger.info("\n\n" + "="*70)
-    logger.info(f"{' ' * 20}增强版双色球策略分析报告")
-    logger.info("="*70)
+    logger.info("\n\n" + "="*80)
+    logger.info(f"{' ' * 25}增强版双色球策略分析报告")
+    logger.info("="*80)
     logger.info(f"报告生成时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"分析基于数据: 截至 {last_period} 期 (共 {len(main_df)} 期)")
     logger.info(f"本次预测目标: 第 {last_period + 1} 期")
     logger.info(f"增强功能状态:")
-    logger.info(f"  - 神经网络: {'启用' if ENABLE_NEURAL_NETWORK else '禁用'}")
-    logger.info(f"  - 集成模型: {'启用' if ENABLE_ENSEMBLE_MODELS else '禁用'}")
+    logger.info(f"  - 多模型集成: {'启用' if ENABLE_MULTI_MODEL_ENSEMBLE else '禁用'}")
+    logger.info(f"  - 神经网络模拟: {'启用' if ENABLE_NEURAL_SIMULATION else '禁用'}")
     logger.info(f"  - 特征重要性: {'启用' if ENABLE_FEATURE_IMPORTANCE else '禁用'}")
-    logger.info(f"  - 高级模式: {'启用' if ENABLE_ADVANCED_PATTERNS else '禁用'}")
+    logger.info(f"  - 高级模式分析: {'启用' if ENABLE_ADVANCED_PATTERNS else '禁用'}")
+    logger.info(f"  - 斜连分析: {'启用' if ENABLE_DIAGONAL_ANALYSIS else '禁用'}")
+    logger.info(f"  - 密度分析: {'启用' if ENABLE_DENSITY_ANALYSIS else '禁用'}")
     logger.info(f"  - 自动纠错: {'启用' if ENABLE_AUTO_CORRECTION else '禁用'}")
     logger.info(f"日志文件: {os.path.basename(log_filename)}")
 
     # 打印优化摘要
     if ENABLE_OPTUNA_OPTIMIZATION and optuna_summary:
-        logger.info("\n" + "="*30 + " 增强Optuna优化摘要 " + "="*30)
+        logger.info("\n" + "="*35 + " 增强Optuna优化摘要 " + "="*35)
         logger.info(f"优化状态: {optuna_summary['status']}")
         if optuna_summary['status'] == '完成':
             logger.info(f"最佳性能得分: {optuna_summary['best_value']:.4f}")
@@ -1439,20 +1819,20 @@ if __name__ == "__main__":
         else: 
             logger.info(f"错误信息: {optuna_summary['error']}")
     else:
-        logger.info("\n--- 本次分析使用脚本内置的默认权重 ---")
+        logger.info("\n--- 本次分析使用脚本内置的增强默认权重 ---")
 
     # 全局分析
     full_history_arm_rules = analyze_associations(main_df, active_weights)
     
     # 增强回测
-    logger.info("\n" + "="*30 + " 增强策略回测摘要 " + "="*30)
+    logger.info("\n" + "="*35 + " 增强策略回测摘要 " + "="*35)
     backtest_results_df, backtest_stats = run_enhanced_backtest(
         main_df, ML_LAG_FEATURES, active_weights, full_history_arm_rules, BACKTEST_PERIODS_COUNT
     )
     
     if not backtest_results_df.empty:
         num_periods_tested = len(backtest_results_df['period'].unique())
-        num_combos_per_period = active_weights.get('NUM_COMBINATIONS_TO_GENERATE', 12)
+        num_combos_per_period = active_weights.get('NUM_COMBINATIONS_TO_GENERATE', 15)
         total_bets = len(backtest_results_df)
         
         logger.info(f"回测周期: 最近 {num_periods_tested} 期 | 每期注数: {num_combos_per_period} | 总投入注数: {total_bets}")
@@ -1490,6 +1870,11 @@ if __name__ == "__main__":
             percentage = count / len(backtest_results_df) * 100
             logger.info(f"    - {hits}个红球: {count} 次 ({percentage:.1f}%)")
         
+        # 组合得分分析
+        if 'combo_score' in backtest_results_df.columns:
+            avg_combo_score = backtest_results_df['combo_score'].mean()
+            logger.info(f"  - 平均组合得分: {avg_combo_score:.2f}")
+        
         logger.info("\n--- 3. 每期最佳命中表现 ---")
         best_hits_df = backtest_stats.get('best_hits_per_period')
         if best_hits_df is not None and not best_hits_df.empty:
@@ -1521,11 +1906,23 @@ if __name__ == "__main__":
                 avg_performance = np.mean([c['best_red_hits'] for c in recent_corrections])
                 logger.info(f"  - 最近10期平均红球命中: {avg_performance:.2f}")
                 logger.info("  - 纠错机制已根据历史表现动态调整权重")
+                
+                # 显示权重变化
+                final_weights = backtest_stats.get('final_weights', {})
+                if final_weights:
+                    logger.info("  - 主要权重调整:")
+                    key_weights = ['FREQ_SCORE_WEIGHT', 'ML_PROB_SCORE_WEIGHT_RED', 'ENSEMBLE_PROB_SCORE_WEIGHT_RED']
+                    for key in key_weights:
+                        if key in final_weights and key in DEFAULT_WEIGHTS:
+                            original = DEFAULT_WEIGHTS[key]
+                            final = final_weights[key]
+                            change = ((final - original) / original) * 100
+                            logger.info(f"    - {key}: {original:.2f} → {final:.2f} ({change:+.1f}%)")
     else: 
         logger.warning("增强回测未产生有效结果，可能是数据量不足。")
     
     # 最终推荐
-    logger.info("\n" + "="*30 + f" 第 {last_period + 1} 期 增强推荐 " + "="*30)
+    logger.info("\n" + "="*35 + f" 第 {last_period + 1} 期 增强推荐 " + "="*35)
     
     final_recs, final_rec_strings, analysis_summary, final_models, final_scores = run_enhanced_analysis_and_recommendation(
         main_df, ML_LAG_FEATURES, active_weights, full_history_arm_rules
@@ -1539,20 +1936,26 @@ if __name__ == "__main__":
     if ENABLE_FEATURE_IMPORTANCE and 'feature_importance' in analysis_summary:
         feature_importance = analysis_summary['feature_importance']
         if 'top_features' in feature_importance:
-            logger.info("\n--- 特征重要性分析 (Top 10) ---")
+            logger.info("\n--- 特征重要性分析 (Top 15) ---")
             for i, (feature, importance) in enumerate(feature_importance['top_features'], 1):
-                logger.info(f"  {i:2d}. {feature:<30s}: {importance:.4f}")
+                logger.info(f"  {i:2d}. {feature:<35s}: {importance:.4f}")
+            
+            # 特征类型分布
+            if 'feature_type_importance' in feature_importance:
+                logger.info("\n--- 特征类型重要性分布 ---")
+                for ftype, importance in feature_importance['feature_type_importance'].items():
+                    logger.info(f"  - {ftype:<12s}: {importance:.4f}")
     
     logger.info("\n--- 增强复式参考 ---")
     if final_scores and final_scores.get('red_scores'):
-        top_10_red = sorted([
-            n for n, _ in sorted(final_scores['red_scores'].items(), key=lambda x: x[1], reverse=True)[:10]
+        top_12_red = sorted([
+            n for n, _ in sorted(final_scores['red_scores'].items(), key=lambda x: x[1], reverse=True)[:12]
         ])
-        top_10_blue = sorted([
-            n for n, _ in sorted(final_scores['blue_scores'].items(), key=lambda x: x[1], reverse=True)[:10]
+        top_12_blue = sorted([
+            n for n, _ in sorted(final_scores['blue_scores'].items(), key=lambda x: x[1], reverse=True)[:12]
         ])
-        logger.info(f"  红球 (Top 10): {' '.join(f'{n:02d}' for n in top_10_red)}")
-        logger.info(f"  蓝球 (Top 10): {' '.join(f'{n:02d}' for n in top_10_blue)}")
+        logger.info(f"  红球 (Top 12): {' '.join(f'{n:02d}' for n in top_12_red)}")
+        logger.info(f"  蓝球 (Top 12): {' '.join(f'{n:02d}' for n in top_12_blue)}")
     
     # 高级分析摘要
     logger.info("\n--- 高级分析摘要 ---")
@@ -1563,8 +1966,8 @@ if __name__ == "__main__":
             if value is not None:
                 logger.info(f"    - {key}: {value}")
     
-    logger.info("\n" + "="*70)
+    logger.info("\n" + "="*80)
     logger.info(f"--- 增强版报告结束 (详情请查阅: {os.path.basename(log_filename)}) ---")
-    logger.info("="*70)
+    logger.info("="*80)
 
 print("增强版双色球分析系统执行完成！")
